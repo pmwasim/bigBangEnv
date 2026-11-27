@@ -32,7 +32,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "brain_options": {},
     "reflex": True,
     "fuel": 1000.0,
-    "regen": 1.0,
+    # Sustained throughput is regen minus the 1-unit heartbeat, in emits per tick.
+    # 4.0 keeps up with issues_per_tick=3; at 1.0 a drained cell could never emit again.
+    "regen": 4.0,
     "reasoner_fuel": 500.0,
     "reasoner_regen": 2.0,
     "reasoner_reserve": 10.0,
@@ -42,6 +44,26 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------- cells
+def drain(cell: Cell, ctx: Context, fresh: list[Any], send: Any) -> None:
+    """Work through ``cell.memory['backlog']`` plus fresh items without ever dropping one.
+
+    ``send(item)`` returns True once the item is handled. Anything it can't
+    afford yet stays in the persisted backlog and is retried as energy
+    regenerates; with no fuel left, items aren't even attempted (no denial spam).
+    """
+    backlog = []
+    for item in cell.memory["backlog"] + fresh:
+        if ctx.fuel < Kernel.EMIT_COST:
+            backlog.append(item)  # unaffordable now: keep it
+        elif not send(item):
+            if ctx.fuel < Kernel.EMIT_COST:
+                backlog.append(item)  # ran dry part-way: keep it
+            else:  # refused for a lasting reason (capability, floor, schema): logged by the kernel
+                cell.memory["undeliverable"] = cell.memory.get("undeliverable", 0) + 1
+    cell.memory["backlog"] = backlog
+    cell.memory["max_backlog"] = max(cell.memory["max_backlog"], len(backlog))
+
+
 class Perception(Cell):
     """Sensory cell: validates, truncates and de-duplicates raw issues."""
 
@@ -51,9 +73,10 @@ class Perception(Cell):
     def __init__(self, name: str = "perception", **kw: Any):
         kw.setdefault("emits", ["issue.new"])
         super().__init__(name, **kw)
-        self.memory.update(seen=[], dropped=0)
+        self.memory.update(seen=[], dropped=0, backlog=[], max_backlog=0)
 
     def step(self, ctx: Context) -> None:
+        fresh = []
         for signal in ctx.inbox:
             issue = signal.payload
             ok = (
@@ -68,12 +91,10 @@ class Perception(Cell):
             if not ok or issue["id"] in self.memory["seen"]:
                 self.memory["dropped"] += 1
                 continue
-            self.memory["seen"].append(issue["id"])
-            ctx.emit("issue.new", {
-                "id": issue["id"],
-                "title": issue["title"][:MAX_TITLE],
-                "body": issue.get("body", "")[:MAX_BODY],
-            })
+            self.memory["seen"].append(issue["id"])  # accepted: it now lives in the backlog until sent
+            fresh.append({"id": issue["id"], "title": issue["title"][:MAX_TITLE],
+                          "body": issue.get("body", "")[:MAX_BODY]})
+        drain(self, ctx, fresh, lambda item: ctx.emit("issue.new", item) is not None)
 
 
 class Reflex(Cell):
@@ -89,7 +110,7 @@ class Reflex(Cell):
         kw.setdefault("declassify", True)
         super().__init__(name, **kw)
         self.enabled = enabled
-        self.memory.update(hits=0, escalated=0)
+        self.memory.update(hits=0, escalated=0, backlog=[], max_backlog=0)
 
     def classify(self, title: str, body: str) -> str | None:
         lowered = title.lower().strip()
@@ -101,18 +122,23 @@ class Reflex(Cell):
             return "spam"
         return None
 
+    def _handle(self, ctx: Context, issue: dict[str, Any]) -> bool:
+        label = self.classify(issue["title"], issue["body"]) if self.enabled else None
+        if label is None:
+            if ctx.emit("issue.novel", issue) is None:
+                return False
+            self.memory["escalated"] += 1
+            return True
+        sent = ctx.emit_declassified(
+            "action.label", {"issue": issue["id"], "label": label, "source": "auto"}, LABEL_SCHEMA
+        )
+        if sent is None:
+            return False
+        self.memory["hits"] += 1
+        return True
+
     def step(self, ctx: Context) -> None:
-        for signal in ctx.inbox:
-            issue = signal.payload
-            label = self.classify(issue["title"], issue["body"]) if self.enabled else None
-            if label is None:
-                self.memory["escalated"] += 1
-                ctx.emit("issue.novel", issue)
-            else:
-                self.memory["hits"] += 1
-                ctx.emit_declassified(
-                    "action.label", {"issue": issue["id"], "label": label, "source": "auto"}, LABEL_SCHEMA
-                )
+        drain(self, ctx, [s.payload for s in ctx.inbox], lambda issue: self._handle(ctx, issue))
 
 
 class Reasoner(Cell):
@@ -173,23 +199,28 @@ class Commander(Cell):
     def __init__(self, name: str = "commander", **kw: Any):
         kw.setdefault("emits", ["action.close", "action.reopen", "action.label"])
         super().__init__(name, **kw)
-        self.memory.update(accepted=0, rejected=0)
+        self.memory.update(accepted=0, rejected=0, backlog=[], max_backlog=0)
+
+    def _handle(self, ctx: Context, command: str) -> bool:
+        match = self.PATTERN.match(command)
+        if not match:
+            self.memory["rejected"] += 1
+            return True
+        verb, number, label_issue, label = match.groups()
+        if verb:
+            sent = ctx.emit(f"action.{verb.lower()}", {"issue": int(number)})
+        elif label in LABELS:
+            sent = ctx.emit("action.label", {"issue": int(label_issue), "label": label, "source": "owner"})
+        else:
+            self.memory["rejected"] += 1
+            return True
+        if sent is None:
+            return False
+        self.memory["accepted"] += 1
+        return True
 
     def step(self, ctx: Context) -> None:
-        for signal in ctx.inbox:
-            match = self.PATTERN.match(str(signal.payload))
-            if not match:
-                self.memory["rejected"] += 1
-                continue
-            verb, number, label_issue, label = match.groups()
-            if verb:
-                ctx.emit(f"action.{verb.lower()}", {"issue": int(number)})
-            elif label in LABELS:
-                ctx.emit("action.label", {"issue": int(label_issue), "label": label, "source": "owner"})
-            else:
-                self.memory["rejected"] += 1
-                continue
-            self.memory["accepted"] += 1
+        drain(self, ctx, [str(s.payload) for s in ctx.inbox], lambda command: self._handle(ctx, command))
 
 
 class Journal(Cell):
@@ -359,6 +390,8 @@ def report(kernel: Kernel, ledger: Ledger) -> dict[str, Any]:
             "backlog": len(kernel.cells["reasoner"].memory["backlog"]),
         },
         "motor": {k: kernel.cells["motor"].memory[k] for k in ("executed", "vetoed", "failed")},
+        "backlogs": {name: len(kernel.cells[name].memory.get("backlog", kernel.cells[name].memory.get("unsent", [])))
+                     for name in ("perception", "reflex", "reasoner", "commander", "motor")},
         "defense": {k: kernel.cells["defense"].memory[k] for k in ("mode", "vetoes", "lockdowns")},
         "work_energy": round(work_energy, 3),
         "work_energy_per_issue": round(work_energy / labelled, 3) if labelled else None,

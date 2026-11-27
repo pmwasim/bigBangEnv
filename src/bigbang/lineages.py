@@ -31,7 +31,18 @@ class Motor(Cell):
         super().__init__(name, **kw)
         self.effectors = effectors
         self.hold = hold
-        self.memory.update(pending=[], executed=0, vetoed=0, failed=0)
+        # unsent: outcome reports not yet affordable; kept so no report is ever lost
+        self.memory.update(pending=[], executed=0, vetoed=0, failed=0, unsent=[])
+
+    def _report(self, ctx: Context, verb: str, body: dict[str, Any]) -> None:
+        self.memory["unsent"].append([verb, body])
+
+    def _flush(self, ctx: Context) -> None:
+        unsent = []
+        for verb, body in self.memory["unsent"]:
+            if ctx.fuel < 1.0 or ctx.emit(f"outcome.{verb}", body) is None:
+                unsent.append([verb, body])
+        self.memory["unsent"] = unsent
 
     def step(self, ctx: Context) -> None:
         for signal in ctx.inbox:
@@ -45,22 +56,23 @@ class Motor(Cell):
             verb = topic.split(".", 1)[1]
             if ctx.is_inhibited(topic):
                 self.memory["vetoed"] += 1
-                ctx.emit(f"outcome.{verb}", {"status": "vetoed", "action": payload})
+                self._report(ctx, verb, {"status": "vetoed", "action": payload})
                 continue
             effector = self.effectors.get(verb)
             if effector is None:
                 self.memory["failed"] += 1
-                ctx.emit(f"outcome.{verb}", {"status": "failed", "error": "no effector", "action": payload})
+                self._report(ctx, verb, {"status": "failed", "error": "no effector", "action": payload})
                 continue
             try:
                 result = effector(payload)
             except Exception as exc:  # noqa: BLE001 - world failures are data, not crashes
                 self.memory["failed"] += 1
-                ctx.emit(f"outcome.{verb}", {"status": "failed", "error": str(exc)[:200], "action": payload})
+                self._report(ctx, verb, {"status": "failed", "error": str(exc)[:200], "action": payload})
                 continue
             self.memory["executed"] += 1
-            ctx.emit(f"outcome.{verb}", {"status": "done", "action": payload, "result": result})
+            self._report(ctx, verb, {"status": "done", "action": payload, "result": result})
         self.memory["pending"] = still_waiting
+        self._flush(ctx)
 
 
 class Defense(Cell):

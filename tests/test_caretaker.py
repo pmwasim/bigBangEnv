@@ -95,6 +95,33 @@ def test_starved_reasoner_backlogs_instead_of_dropping():
     assert all(ledger.data["issues"][str(n)]["labels"] for n in range(1, 10))
 
 
+def test_sustained_feed_loses_no_issue():
+    # Regression (PR review): Perception marked issues seen, then failed to emit them.
+    issues = [{"id": n, "title": f"[bug] crash {n}", "body": ""} for n in range(1, 1101)]
+    kernel, ledger = build()
+    run(kernel, Host(issues=issues), ticks=len(issues) // 3 + 20)
+    assert sum(1 for v in ledger.data["issues"].values() if v["labels"]) == 1100
+    assert not any(e["event"] == "denied" for e in kernel.trace)
+
+
+def test_cells_keep_work_they_cannot_afford_yet():
+    kernel, ledger = build({"fuel": 3.0, "regen": 1.5})
+    issues = [{"id": n, "title": f"[docs] page {n}", "body": ""} for n in range(1, 8)]
+    host = Host(issues=issues)
+    run(kernel, host, ticks=3)
+    assert kernel.cells["perception"].memory["backlog"] or kernel.cells["reflex"].memory["backlog"]
+    run(kernel, host, ticks=60)
+    assert all(ledger.data["issues"][str(n)]["labels"] == ["docs"] for n in range(1, 8))
+
+
+def test_permanent_refusals_are_not_retried_forever():
+    kernel, ledger = build()
+    kernel.inject("owner.command", "close 1", trust=Trust.WORLD)  # blocked by the floor, fuel is fine
+    kernel.run(5)
+    assert kernel.cells["commander"].memory["backlog"] == []
+    assert kernel.cells["commander"].memory["undeliverable"] == 1
+
+
 def test_ledger_persists(tmp_path):
     path = tmp_path / "ledger.json"
     Ledger(path).close({"issue": 4})
