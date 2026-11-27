@@ -87,9 +87,10 @@ qm create "$INCUBATOR_ID" \
   --balloon 0 \
   --machine q35 \
   --bios ovmf \
-  --efidisk0 "${STORAGE}:4,efitype=4m,pre-enrolled-keys=1" \
+  --efidisk0 "${STORAGE}:4,efitype=4m,pre-enrolled-keys=0" \
   --scsihw virtio-scsi-pci \
   --net0 "virtio,bridge=${BRIDGE},firewall=1" \
+  --serial0 socket \
   --ostype l26 \
   --onboot 1 \
   --agent 1
@@ -118,11 +119,15 @@ echo " [✓] VM $INCUBATOR_ID ($INCUBATOR_NAME) provisioned!"
 echo " Starting VM $INCUBATOR_ID..."
 qm start "$INCUBATOR_ID"
 
-echo "[+] Waiting for guest agent and IP address..."
-sleep 10
+echo "[+] Waiting for VM $INCUBATOR_ID network IP address..."
+VM_MAC=$(qm config "$INCUBATOR_ID" | sed -n 's/.*virtio=\([^,]*\).*/\1/p' | tr '[:upper:]' '[:lower:]')
+sleep 12
 GUEST_IP=""
-for i in {1..20}; do
+for i in {1..30}; do
   GUEST_IP=$(qm guest cmd "$INCUBATOR_ID" network-get-interfaces 2>/dev/null | grep -oE '192\.168\.[0-9]+\.[0-9]+' | head -n 1 || true)
+  if [[ -z "$GUEST_IP" && -n "$VM_MAC" ]]; then
+    GUEST_IP=$(ip neigh show dev "$BRIDGE" 2>/dev/null | awk -v mac="$VM_MAC" 'tolower($0) ~ mac && $1 ~ /^192\.168\./ {print $1; exit}' || true)
+  fi
   if [[ -n "$GUEST_IP" ]]; then
     break
   fi
