@@ -43,7 +43,7 @@
 | Emissions, steps and declared spend cost energy | `_emit`, `step`, `_spend` | `denied`, `dormant` | `test_spend_*`, `test_energy_*` |
 | Regeneration and wake | `step` | `wake` | `test_regeneration_wakes_dormant_cells` |
 | Wildcard inhibition pauses pending signals; held time doesn't age them | `step` | `hold` | `test_wildcard_inhibition_cancels_whole_subtree`, `test_inhibition_holds_pending_signals_until_it_lifts` |
-| A veto cancels only the signals it names | `step`, `is_vetoed` | `cancel` | `test_veto_cancels_only_the_named_signal` |
+| A veto cancels only the signals it names, and is remembered after it expires | `step`, `is_vetoed` | `cancel` | `test_veto_cancels_only_the_named_signal`, `test_a_veto_stays_final_for_a_motor_that_slept_through_it` |
 | Taint residue: a cell stays at or below the lowest trust it consumed in a committed step | `Context.__init__`, `_run_cell` | `taint`, `blocked` | `test_stored_world_input_keeps_its_taint_on_a_later_tick`, `test_taint_*` |
 | Receptors absorb excite input below a cell's `accepts` | `step` | `blocked` (`why=receptor`) | `test_owner_commands_still_work_after_world_input_on_the_command_topic` |
 | Atomic steps, quarantine, revive | `_run_cell`, `revive` | `quarantine`, `revive` | `test_crashing_cell_*`, `test_revive_*` |

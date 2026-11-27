@@ -115,6 +115,9 @@ class Kernel:
         self.quarantined: set[str] = set()
         self.topic_floor: dict[str, Trust] = {}
         self.taint: dict[str, Trust] = {}  # residue: lowest trust each cell has consumed
+        # A veto is final: once live, the kernel remembers it after the signal expires,
+        # so a cell that slept through it still sees it (signal id -> veto topic).
+        self.vetoed: dict[int, str] = {}
         self.queue: list[Signal] = []
         self.trace: list[dict[str, Any]] = []
         self.halted = False
@@ -200,6 +203,9 @@ class Kernel:
 
         pauses = [s.topic for s in live if s.kind is Kind.INHIBIT and _veto_ids(s) is None]
         vetoes = [s for s in live if s.kind is Kind.INHIBIT and _veto_ids(s) is not None]
+        for veto in vetoes:
+            for signal_id in _veto_ids(veto) or ():
+                self.vetoed.setdefault(signal_id, veto.topic)
         pending: list[Signal] = []  # deliverable excite signals, plus live inhibit signals
         held: list[Signal] = []  # paused: kept in the queue, not delivered, not aged
         for signal in live:
@@ -284,7 +290,9 @@ class Kernel:
         )
 
     def is_vetoed(self, signal_id: int, topic: str) -> bool:
-        """True while a live veto names ``signal_id`` on a topic matching ``topic``."""
+        """True once a veto names ``signal_id`` on a topic matching ``topic``. Vetoes are final."""
+        if signal_id in self.vetoed and topic_matches(self.vetoed[signal_id], topic):
+            return True
         probe = Signal(signal_id, topic, None, Kind.EXCITE, "", Trust.WORLD, self.tick, 0)
         return any(
             s.kind is Kind.INHIBIT and _vetoes(s, probe) and not s.expired(self.tick)
@@ -356,6 +364,7 @@ class Kernel:
                 }
                 for name, cell in self.cells.items()
             },
+            "vetoed": {str(i): topic for i, topic in sorted(self.vetoed.items())},
         }
 
     def restore(self, snap: dict[str, Any]) -> None:
@@ -367,6 +376,7 @@ class Kernel:
         self._next_id = snap["next_id"]
         self.halted = snap["halted"]
         self.queue = [Signal.from_dict(s) for s in snap["queue"]]
+        self.vetoed = {int(i): topic for i, topic in snap.get("vetoed", {}).items()}
         self.dormant, self.quarantined, self.taint = set(), set(), {}
         for name, state in snap["cells"].items():
             self.cells[name].memory = json.loads(json.dumps(state["memory"]))

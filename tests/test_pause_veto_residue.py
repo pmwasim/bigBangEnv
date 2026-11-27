@@ -234,6 +234,46 @@ def test_snapshots_from_before_adr_0010_still_resume():
     assert ledger.data["issues"]["3"]["labels"] == ["bug"]
 
 
+def test_a_veto_stays_final_for_a_motor_that_slept_through_it():
+    # PR #3 review (Codex): a dormant Motor missed the timed veto and ran the action on waking.
+    calls = []
+    defense = Defense("defense", forbidden=("delete",), window=3)
+    motor = Motor("motor", {"delete": lambda p: calls.append(p) or {}})
+    k = big_bang(defense, motor)
+    k.inject("action.delete", {"issue": 2}, trust=Trust.OPERATOR)
+    k.run(1)  # both receive it at tick 1; Defense vetoes it
+    k.dormant.add("motor")  # Motor sleeps through the veto's whole life
+    k.budgets["motor"].spent = k.budgets["motor"].capacity
+    k.run(10)
+    k.revive("motor", refuel=100.0)
+    k.run(5)
+    assert calls == []
+    assert motor.memory["vetoed"] == 1
+
+
+def test_veto_record_survives_snapshot_and_restore():
+    def boot():
+        return big_bang(Defense("defense", forbidden=("delete",), window=3),
+                        Motor("motor", {"delete": lambda p: {}}))
+
+    k = boot()
+    sig = k.inject("action.delete", {"issue": 2}, trust=Trust.OPERATOR)
+    k.run(8)  # the veto signal has long expired
+    k2 = boot()
+    k2.restore(k.snapshot())
+    assert k2.is_vetoed(sig.id, "action.delete")
+
+
+def test_legacy_recent_entries_count_toward_the_repeat_limit():
+    defense = Defense("defense", max_repeats=2, window=5)
+    k = big_bang(defense)
+    body = '{"issue": 1, "label": "bug"}'
+    defense.memory["recent"] = [[0, "action.label", body], [0, "action.label", body]]  # pre-ADR-0010
+    sig = k.inject("action.label", {"issue": 1, "label": "bug"}, trust=Trust.OPERATOR)
+    k.run(2)
+    assert k.is_vetoed(sig.id, "action.label")
+
+
 # ------------------------------------------ the loop breaker is scoped
 def test_loop_breaker_stops_only_the_repeated_action():
     kernel, ledger = build()

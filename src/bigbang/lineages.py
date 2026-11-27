@@ -175,12 +175,13 @@ class Defense(Cell):
             self.memory["mode"] = "lockdown"
             self.memory["lockdowns"] += 1
 
-        copies: dict[tuple[str, str], list[int]] = {}
+        copies: dict[tuple[str, str], list[int | None]] = {}
         for entry in recent:
-            if len(entry) > 3 and entry[3] is not None:  # entries from older snapshots carry no id
-                copies.setdefault((entry[1], entry[2]), []).append(entry[3])
+            # Entries from older snapshots carry no id: they still count as copies,
+            # they just can't be vetoed any more.
+            copies.setdefault((entry[1], entry[2]), []).append(entry[3] if len(entry) > 3 else None)
         for (topic, _), ids in sorted(copies.items()):
-            extra = [i for i in ids[self.max_repeats:] if i not in vetoed]
+            extra = [i for i in ids[self.max_repeats:] if i is not None and i not in vetoed]
             if extra:
                 self._veto(ctx, topic, extra, "loop: repeated action")
                 vetoed.update(extra)
