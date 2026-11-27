@@ -35,6 +35,17 @@ def test_world_cannot_inject_owner_commands_directly():
     assert any(e["event"] == "blocked" for e in kernel.trace)
 
 
+def test_world_cannot_inject_actions_past_the_motor_floor():
+    # Regression (PR #1 review, P2): this used to close issue 1.
+    kernel, ledger = build()
+    ledger.data["issues"]["1"] = {"closed": False, "labels": []}
+    kernel.inject("action.close", {"issue": 1}, trust=Trust.WORLD)
+    kernel.run(4)
+    assert ledger.data["issues"]["1"]["closed"] is False
+    assert kernel.cells["motor"].memory["executed"] == 0
+    assert any(e["event"] == "blocked" and e["topic"] == "action.close" for e in kernel.trace)
+
+
 def test_reflex_handles_tagged_issues_without_brain():
     kernel, ledger = build(brain=OfflineBrain())
     run(kernel, Host(issues=[{"id": 5, "title": "[docs] typo", "body": ""}]))
