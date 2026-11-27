@@ -1,8 +1,12 @@
-# bigBangEnv — notes for coding agents
+# bigBangEnv — notes for Claude Code
 
-- Read `docs/VISION.md` (principles P1–P5) and `docs/ROADMAP.md` before changing anything. Don't build a milestone before the previous one meets its exit criteria.
-- Kernel laws live in `src/bigbang/kernel.py`. Never let a cell construct a `Signal`, raise its own trust, or reach the kernel except through `Context`.
-- Every new kernel law needs a test in `tests/` and a row in `docs/ARCHITECTURE.md`.
-- Hard-to-reverse design choices get an ADR in `docs/decisions/` (next number, same format).
-- Biological terms must map to the glossary in `docs/VISION.md`; add the engineering definition first.
+The shared agent guide is AGENTS.md, imported here so Claude Code loads it:
+
+@AGENTS.md
+
+Handoff format: see AGENTS-HANDOFF.md.
+
+Claude-specific reminders:
 - Run `python3 -m pytest -q` before committing.
+- Bundle shell steps into as few commands as you can; each unapproved command costs the owner a tap.
+- Don't edit `.claude/settings.json` permissions in the same PR as other work. Permission changes go in their own PR for the owner to merge.
