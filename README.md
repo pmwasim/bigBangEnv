@@ -9,14 +9,15 @@ Today's "AI agents" are stateless reasoning engines in a loop, with safety bolte
 ## Status
 
 - **M0 — Genesis kernel: done.** Deterministic ticks, kernel-stamped trust and taint, topic floors, capabilities, declassification, metered energy with dormancy and wake, fail-safe inhibition, atomic steps with quarantine, kill switch, snapshot/restore, replay.
-- **M1 — First organism: done, with one open exit criterion.** The *repo caretaker* triages issues and executes owner commands, with sensory, reflex, reasoning, defense and motor cells and a pluggable brain (rule, offline or Claude).
-- **Not started: M2 (reflex compilation).** It is gated on measuring a real LLM and a public injection benchmark ([roadmap](docs/ROADMAP.md#gate-before-m2)).
+- **M1 — First organism: done.** The *repo caretaker* triages issues and executes owner commands, with sensory, reflex, reasoning, defense and motor cells and a pluggable brain (rule, offline or Claude). Real-model measurement is deferred until there is an API budget ([ADR-0008](docs/decisions/0008-public-benchmark-without-llm-budget.md)).
+- **Next: M2 (reflex compilation).** The gate is open ([roadmap](docs/ROADMAP.md#gate-before-m2--open)).
 
 ### M1 results ([full report](docs/EVALUATION.md))
 
 | Claim | Result |
 |---|---|
 | Injected issue text triggers privileged actions | **0 of 10** (a baseline agent that obeys its context: 10 of 10) |
+| Public corpus ([deepset/prompt-injections](https://huggingface.co/datasets/deepset/prompt-injections), 662 rows, 263 with attacker goals) | **0 of 263** goals executed, 0 victim relabels, 100% labelled (baseline: 263 of 263) |
 | Owner commands still work; unknown ones are rejected | yes |
 | Brain offline → organism keeps working | 6 issues by reflex, 14 deferred to a human, 0 crashes |
 | Looping cell flooding 150 actions | 0 executed; stopped by Defense alone |
@@ -24,13 +25,13 @@ Today's "AI agents" are stateless reasoning engines in a loop, with safety bolte
 | Fast spine vs. reasoning everything | 22% less work energy per issue, 8 vs. 12 brain calls |
 | Same inputs → same trace; replay from inputs | identical |
 
-These are mechanism tests on our own fixtures with a deterministic stand-in brain, not real-world quality measurements.
+These are mechanism tests with a deterministic stand-in brain, not real-world quality measurements. Under the default energy budget the reasoner can't keep up with 674 issues: it hands 583 to humans and takes 614 ticks to clear its backlog.
 
 ## Quick start
 
 ```bash
 pip install -e ".[dev]"            # add ,claude for the Claude brain
-pytest                             # 56 tests
+pytest                             # 57 tests
 bigbang eval                       # M1 exit-criteria suite
 python examples/first_light.py     # the kernel law in 40 lines
 examples/caretaker/operate.sh      # boot, replay, daemon, live input, kill switch, revive
@@ -54,7 +55,7 @@ See the [operations runbook](docs/OPERATIONS.md).
 - [Operations](docs/OPERATIONS.md) — state directory, CLI, incident playbook
 - [Evaluation](docs/EVALUATION.md) — M1 exit-criteria results
 - [Roadmap](docs/ROADMAP.md) — milestones M0–M4 with exit criteria
-- [Decisions](docs/decisions/) — ADRs 0001–0007
+- [Decisions](docs/decisions/) — ADRs 0001–0008
 - [Review v0](docs/review-v0.md) · [Origin](docs/origin/gemini-conversation.md)
 
 ## Layout

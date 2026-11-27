@@ -127,29 +127,40 @@ class Reasoner(Cell):
         super().__init__(name, **kw)
         self.brain = brain
         self.reserve = reserve
-        self.memory.update(thoughts=0, outages=0, deferred_low_fuel=0, energy=0.0)
+        # backlog: [issue, decided label or None] that could not be emitted yet
+        self.memory.update(thoughts=0, outages=0, deferred_low_fuel=0, energy=0.0, backlog=[], max_backlog=0)
+
+    def _decide(self, ctx: Context, issue: dict[str, Any]) -> str:
+        if ctx.fuel < self.reserve:
+            self.memory["deferred_low_fuel"] += 1  # sensed scarcity: don't think
+            return "needs-human"
+        try:
+            thought = self.brain.classify(issue["title"], issue["body"], LABELS)
+        except BrainUnavailable:
+            self.memory["outages"] += 1
+            return "needs-human"
+        if not ctx.spend(thought.cost, f"brain:{self.brain.name}"):
+            self.memory["deferred_low_fuel"] += 1
+            return "needs-human"
+        self.memory["thoughts"] += 1
+        self.memory["energy"] += thought.cost
+        return thought.label
 
     def step(self, ctx: Context) -> None:
-        for signal in ctx.inbox:
-            issue = signal.payload
-            label = "needs-human"
-            if ctx.fuel < self.reserve:
-                self.memory["deferred_low_fuel"] += 1  # sensed scarcity: don't think
-            else:
-                try:
-                    thought = self.brain.classify(issue["title"], issue["body"], LABELS)
-                except BrainUnavailable:
-                    self.memory["outages"] += 1
-                else:
-                    if ctx.spend(thought.cost, f"brain:{self.brain.name}"):
-                        label = thought.label
-                        self.memory["thoughts"] += 1
-                        self.memory["energy"] += thought.cost
-                    else:
-                        self.memory["deferred_low_fuel"] += 1
-            ctx.emit_declassified(
+        work = self.memory["backlog"] + [[s.payload, None] for s in ctx.inbox]
+        backlog = []
+        for issue, label in work:
+            if ctx.fuel < Kernel.EMIT_COST:  # can't even report: keep it, don't drop it
+                backlog.append([issue, label])
+                continue
+            label = label or self._decide(ctx, issue)
+            sent = ctx.emit_declassified(
                 "action.label", {"issue": issue["id"], "label": label, "source": "auto"}, LABEL_SCHEMA
             )
+            if sent is None:
+                backlog.append([issue, label])  # decided but unaffordable: retry, never re-pay
+        self.memory["backlog"] = backlog
+        self.memory["max_backlog"] = max(self.memory["max_backlog"], len(backlog))
 
 
 class Commander(Cell):
@@ -343,7 +354,10 @@ def report(kernel: Kernel, ledger: Ledger) -> dict[str, Any]:
         "issues_labelled": labelled,
         "issues_closed": sum(1 for i in ledger.data["issues"].values() if i["closed"]),
         "reflex_hits": reflex["hits"],
-        "reasoner": {k: kernel.cells["reasoner"].memory[k] for k in ("thoughts", "outages", "deferred_low_fuel", "energy")},
+        "reasoner": {
+            **{k: kernel.cells["reasoner"].memory[k] for k in ("thoughts", "outages", "deferred_low_fuel", "energy", "max_backlog")},
+            "backlog": len(kernel.cells["reasoner"].memory["backlog"]),
+        },
         "motor": {k: kernel.cells["motor"].memory[k] for k in ("executed", "vetoed", "failed")},
         "defense": {k: kernel.cells["defense"].memory[k] for k in ("mode", "vetoes", "lockdowns")},
         "work_energy": round(work_energy, 3),

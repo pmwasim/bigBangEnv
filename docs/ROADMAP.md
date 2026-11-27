@@ -16,7 +16,7 @@ Each milestone maps to levels of the original Genesis-to-Body blueprint. **No mi
 
 **Exit criteria — met:** test suite green; identical inputs give identical traces (`determinism` scenario); crashing and exhausted cells don't affect others (`crash_isolation`, `sensed_scarcity`).
 
-## M1 — Three lineages + Defense *(Level 3, partial)* — **done, with one open criterion**
+## M1 — Three lineages + Defense *(Level 3, partial)* — **done**
 
 - [x] Sensory (perception), reflex, reasoning, motor-planning (commander), motor, defense and housekeeping cells
 - [x] Defense runs outside the reasoner, holds veto authority, and is deterministic
@@ -29,17 +29,15 @@ Each milestone maps to levels of the original Genesis-to-Body blueprint. **No mi
 | Criterion | Status |
 |---|---|
 | Injection resistance vs. a plain tool-loop baseline | **Met on our own suite:** 0 of 10 privileged actions executed vs. 10 of 10 for a baseline that obeys instructions in its context |
-| Injection resistance on a *public* benchmark (e.g. AgentDojo) | **Open:** needs a benchmark adapter and a real LLM brain |
+| Injection resistance on a *public* benchmark | **Met for the architecture ([ADR-0008](decisions/0008-public-benchmark-without-llm-budget.md)):** all 662 rows of deepset/prompt-injections, 263 with attacker goals → 0 privileged actions, 0 victim relabels, 100% labelled (baseline: 263 of 263). Real-model measurement deferred until there is an API budget |
 | Safe operation with the LLM disabled | **Met:** `llm_outage` scenario |
 | Cost per task reported for every run | **Met:** `work_energy_per_issue` in every report |
 
-**Honest limits of the M1 results:** the fixtures are ours (22 issues); the rule brain is a keyword stand-in; the energy numbers are synthetic units; the baseline is deliberately naive. These show that the *mechanisms* work, not real-world quality.
+**Honest limits of the M1 results:** the rule brain is a keyword stand-in; the energy numbers are synthetic units; the baseline is deliberately naive. These show that the *mechanisms* work, not real-world triage quality.
 
-## Gate before M2
+## Gate before M2 — **open**
 
-Per P5, M2 starts only after the open M1 criterion is closed. That needs two owner decisions:
-1. Approve an API budget so `ClaudeBrain` can be measured (quality, real token cost, injection behaviour of the model itself).
-2. Pick the public benchmark and approve the adapter work.
+M1's exit criteria are met (ADR-0008). Still deferred until there is an API budget: real-model quality, real token cost, and how far a real model can be steered within the allowed label set.
 
 ## M2 — Reflex compilation experiment *(Level 4: plasticity)*
 

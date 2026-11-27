@@ -20,6 +20,9 @@ bigbang = "bigbang.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+bigbang = ["data/*.jsonl", "data/README.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

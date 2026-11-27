@@ -66,7 +66,7 @@ owner.command ─▶ commander ────────────────�
 |---|---|---|---|
 | perception | sensory | emits `issue.new` | validate ids/types, truncate, de-duplicate |
 | reflex | reflex | declassify | label tagged/spam issues with no brain |
-| reasoner | reasoning | declassify, own budget | brain-classify novel issues; `needs-human` on outage or low fuel |
+| reasoner | reasoning | declassify, own budget | brain-classify novel issues; `needs-human` on outage or low fuel; anything it can't afford to emit waits in a persisted backlog |
 | commander | motor-planning | OPERATOR ceiling | parse owner commands (`close N`, `reopen N`, `label N L`) |
 | defense | defense | may inhibit `action.*` | rate limit, loop breaker, forbidden verbs |
 | motor | motor | emits `outcome.*` | hold, then execute through the ledger effectors |

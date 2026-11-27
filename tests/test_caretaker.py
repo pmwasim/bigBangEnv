@@ -84,6 +84,17 @@ def test_owner_label_is_not_overridden_by_triage():
     assert ledger.data["issues"]["4"]["labels"] == ["docs"]
 
 
+def test_starved_reasoner_backlogs_instead_of_dropping():
+    kernel, ledger = build({"reasoner_fuel": 6.0, "reasoner_regen": 1.5, "reasoner_reserve": 3.0})
+    issues = [{"id": n, "title": f"unclear {n}", "body": ""} for n in range(1, 10)]
+    host = Host(issues=issues)
+    run(kernel, host, ticks=5)
+    assert kernel.cells["reasoner"].memory["backlog"]  # couldn't afford to report yet
+    run(kernel, host, ticks=60)
+    assert kernel.cells["reasoner"].memory["backlog"] == []
+    assert all(ledger.data["issues"][str(n)]["labels"] for n in range(1, 10))
+
+
 def test_ledger_persists(tmp_path):
     path = tmp_path / "ledger.json"
     Ledger(path).close({"issue": 4})
