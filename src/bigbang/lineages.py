@@ -24,8 +24,12 @@ class Motor(Cell):
 
     Inhibition is a pause, not a kill (ADR-0010): an action whose topic is
     inhibited waits, and resumes once the inhibition lifts, at most
-    ``resume_per_tick`` resumed actions per tick (graded release; None means
-    no limit). An action paused for more than ``patience`` ticks gives up with
+    ``resume_per_tick`` resumed actions per tick on average (graded release;
+    None means no limit). The rate may be fractional: 0.2 releases one action
+    every five ticks. Release credit refills by that rate each tick; while work
+    is being paced the fractional remainder carries over, so 1.5 averages 1.5.
+    On any tick the rate didn't limit, credit is trimmed so the next tick holds
+    at most max(rate, 1), so idle time never builds up a burst. An action paused for more than ``patience`` ticks gives up with
     an ``expired`` outcome. Only a veto that names the action discards it.
     """
 
@@ -39,7 +43,7 @@ class Motor(Cell):
         *,
         hold: int = 1,
         patience: int = 100,
-        resume_per_tick: int | None = None,
+        resume_per_tick: float | None = None,
         **kw: Any,
     ):
         kw.setdefault("emits", ["outcome.*"])
@@ -50,7 +54,9 @@ class Motor(Cell):
         self.resume_per_tick = resume_per_tick
         # pending: [due, topic, payload, signal id, tick first paused or None]
         # unsent: outcome reports not yet affordable; kept so no report is ever lost
-        self.memory.update(pending=[], executed=0, vetoed=0, failed=0, expired=0, resumed=0, unsent=[])
+        # release_credit: how many paused actions may resume right now (graded release)
+        self.memory.update(pending=[], executed=0, vetoed=0, failed=0, expired=0, resumed=0, unsent=[],
+                           release_credit=0.0)
 
     def _report(self, ctx: Context, verb: str, body: dict[str, Any]) -> None:
         self.memory["unsent"].append([verb, body])
@@ -80,11 +86,16 @@ class Motor(Cell):
     def step(self, ctx: Context) -> None:
         for key in ("expired", "resumed"):  # matter restored from before ADR-0010
             self.memory.setdefault(key, 0)
+        self.memory.setdefault("release_credit", 0.0)
         for signal in ctx.inbox:
             self.memory["pending"].append([ctx.tick + self.hold, signal.topic, signal.payload, signal.id, None])
+        rate = self.resume_per_tick
+        if rate is not None:
+            # Rounded so that repeated fractional refills (ten of 0.1) reach exactly 1.0.
+            self.memory["release_credit"] = round(self.memory["release_credit"] + rate, 9)
+        paced = False  # did the release rate hold anything back this tick?
 
         still_waiting = []
-        resumed = 0
         for entry in self.memory["pending"]:
             due, topic, payload = entry[:3]
             sid, paused_since = (entry[3:] + [None, None])[:2]  # older snapshots kept 3 fields
@@ -105,12 +116,19 @@ class Motor(Cell):
                     still_waiting.append([due, topic, payload, sid, paused_since])
                 continue
             if paused_since is not None:
-                if self.resume_per_tick is not None and resumed >= self.resume_per_tick:
-                    still_waiting.append([due, topic, payload, sid, paused_since])  # graded release
-                    continue
-                resumed += 1
+                if self.resume_per_tick is not None:
+                    if self.memory["release_credit"] < 1.0:
+                        still_waiting.append([due, topic, payload, sid, paused_since])  # graded release
+                        paced = True
+                        continue
+                    self.memory["release_credit"] -= 1.0
                 self.memory["resumed"] += 1
             self._execute(ctx, verb, payload)
+        if rate is not None and not paced:
+            # Not limited by the pace this tick (idle, or still paused): keep only enough
+            # credit that the next refill reaches max(rate, 1), so idling builds no burst.
+            # While work is being paced, the fractional remainder carries over intact.
+            self.memory["release_credit"] = min(self.memory["release_credit"], max(rate, 1.0) - rate)
         self.memory["pending"] = still_waiting
         self._flush(ctx)
 

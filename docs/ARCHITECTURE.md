@@ -53,7 +53,7 @@
 
 ## Reusable lineages (`lineages.py`)
 
-- **Motor:** executes `action.<verb>` through host-supplied effectors after a pre-flight hold, and reports `outcome.<verb>` (`done` / `vetoed` / `failed` / `expired`). Effector exceptions become `failed` outcomes, not crashes. An inhibited action waits and resumes when the inhibition lifts, at most `resume_per_tick` per tick; one paused longer than `patience` ticks reports `expired`. Only a veto discards an action.
+- **Motor:** executes `action.<verb>` through host-supplied effectors after a pre-flight hold, and reports `outcome.<verb>` (`done` / `vetoed` / `failed` / `expired`). Effector exceptions become `failed` outcomes, not crashes. An inhibited action waits and resumes when the inhibition lifts, at an average of `resume_per_tick` per tick (fractional rates allowed; ADR-0010); one paused longer than `patience` ticks reports `expired`. Only a veto discards an action.
 - **Defense:** a deterministic guardian. It pauses everything on a rate limit (`action.*` lockdown), vetoes the extra copies of a repeated action (same topic and payload more than N times in a window), and vetoes forbidden verbs by id.
 
 ## The caretaker organism (`apps/caretaker.py`)

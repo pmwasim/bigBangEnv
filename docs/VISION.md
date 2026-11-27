@@ -62,7 +62,7 @@ The industry is building smarter *cells in a vacuum* (better prompts, bigger mod
 | Veto | An inhibit signal that names signal ids and cancels exactly those |
 | Taint residue | The lowest trust a cell has consumed; its later emissions can't exceed it (only declassification can) |
 | Receptor | A cell's `accepts` trust: excite input below it is absorbed at delivery and leaves no residue |
-| Graded release | Motor resumes paused actions at a capped rate (`resume_per_tick`) once an inhibition lifts |
+| Graded release | Motor resumes paused actions at an average rate (`resume_per_tick`, possibly fractional) once an inhibition lifts, with no burst after idle time |
 | Provenance / Taint | The trust level stamped on a signal by the kernel |
 | Declassification | Emitting at a cell's own trust despite tainted input; granted cells and closed-schema payloads only |
 | Quarantine | A cell rolled back and suspended after raising; released by `revive` |
