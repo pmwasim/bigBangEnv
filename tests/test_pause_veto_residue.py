@@ -226,6 +226,21 @@ def test_a_fractional_rate_above_one_keeps_its_average():
     assert max(per_tick) <= 2
 
 
+def test_release_credit_is_not_fooled_by_float_rounding():
+    # PR #7 review (Codex): ten refills of 0.1 sum to 0.9999999999999999, which delayed a release.
+    ledger = Ledger()
+    motor = Motor("motor", ledger.effectors(), resume_per_tick=0.1)
+    k = big_bang(motor)
+    motor.memory["pending"] = [[0, "action.close", {"issue": n}, None, 0] for n in range(3)]  # paused, now free
+    released_at = []
+    for _ in range(30):
+        before = motor.memory["executed"]
+        k.step()
+        if motor.memory["executed"] > before:
+            released_at.append(k.tick)
+    assert released_at == [10, 20, 30]
+
+
 def test_caretaker_resume_rate_follows_a_slow_defense_limit():
     kernel, _ = build({"defense": {"max_actions": 1, "window": 5, "max_repeats": 2, "lockdown_ttl": 10}})
     assert kernel.cells["motor"].resume_per_tick == 0.2

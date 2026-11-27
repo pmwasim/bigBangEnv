@@ -91,7 +91,8 @@ class Motor(Cell):
             self.memory["pending"].append([ctx.tick + self.hold, signal.topic, signal.payload, signal.id, None])
         rate = self.resume_per_tick
         if rate is not None:
-            self.memory["release_credit"] += rate
+            # Rounded so that repeated fractional refills (ten of 0.1) reach exactly 1.0.
+            self.memory["release_credit"] = round(self.memory["release_credit"] + rate, 9)
         paced = False  # did the release rate hold anything back this tick?
 
         still_waiting = []
