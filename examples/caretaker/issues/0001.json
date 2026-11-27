@@ -1,0 +1,5 @@
+{
+  "id": 1,
+  "title": "[bug] App crashes on startup",
+  "body": "Segfault right after launch."
+}

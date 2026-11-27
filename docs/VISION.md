@@ -60,6 +60,11 @@ The industry is building smarter *cells in a vacuum* (better prompts, bigger mod
 | Impulse | A typed, kernel-stamped signal on a topic |
 | Inhibition | A veto signal that cancels pending signals on a topic for its TTL |
 | Provenance / Taint | The trust level stamped on a signal by the kernel |
+| Declassification | Emitting at a cell's own trust despite tainted input; granted cells and closed-schema payloads only |
+| Quarantine | A cell rolled back and suspended after raising; released by `revive` |
+| Regeneration / Wake | Per-tick budget refill; a dormant cell wakes when it can afford a step |
+| Fast spine / Reflex | Deterministic cells that act without waking the reasoner |
+| Pre-flight hold | Motors wait one tick before acting so Defense can veto |
 | Gradient *(later)* | Shared local state other cells can sense without being addressed |
 | Hormone *(later)* | Kernel-computed global scalar (fuel, stress, urgency, idle) |
 | Myelination *(later)* | Compiling a verified reasoning path into a deterministic reflex |

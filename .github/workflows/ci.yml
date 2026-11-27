@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Tests
+        run: python -m pytest -q
+      - name: Evaluation (replays recorded local-model answers; no model, no API)
+        run: bigbang eval --out evaluation.md
+      - name: Operations walkthrough
+        run: examples/caretaker/operate.sh "$RUNNER_TEMP/caretaker"
+      - name: Upload evaluation report
+        if: always() && matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation
+          path: evaluation.md
+
+  # Runs the free local model itself and checks it still reproduces the
+  # recorded answers. Costs CI minutes only: no API key, no paid service.
+  local-model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Cache model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/bigbang/models
+          key: bigbang-model-qwen2.5-1.5b-q4_k_m
+      # Build llama.cpp for a portable CPU target. A native (-march=native) build
+      # crashes with "Illegal instruction" when reused on a runner with a different CPU.
+      - name: Install (builds llama.cpp, portable)
+        env:
+          CMAKE_ARGS: "-DGGML_NATIVE=OFF"
+        run: pip install --no-cache-dir -e ".[dev,local]"
+      - name: Pull model (verified by sha256)
+        run: bigbang model pull --model qwen2.5-1.5b
+      - name: Live evaluation
+        run: bigbang eval --live

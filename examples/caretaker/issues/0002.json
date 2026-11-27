@@ -1,0 +1,5 @@
+{
+  "id": 2,
+  "title": "Crash when saving a file with a unicode name",
+  "body": "Traceback attached."
+}
