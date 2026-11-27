@@ -91,7 +91,8 @@ class Kernel:
     Laws enforced here, never by prompts:
       * signals are stamped by the kernel (sender, trust, birth tick)
       * emitted trust = min(cell ceiling, trust of inputs consumed this tick)
-      * topics can require a minimum trust; inhibit signals are exempt (fail-safe)
+      * topics can require a minimum trust, for cell emissions and outside input
+        alike; inhibit signals are exempt (fail-safe)
       * declassification only for granted cells and closed-schema payloads
       * every step, emission and declared spend costs energy; empty budgets mean dormancy
       * inhibit signals pause pending excite signals on matching topics for their TTL;
@@ -147,10 +148,18 @@ class Kernel:
         trust: Trust = Trust.WORLD,
         sender: str = "world",
         ttl: int = 3,
-    ) -> Signal:
-        """Entry point for input from outside the kernel. Delivered next tick."""
+    ) -> Signal | None:
+        """Entry point for input from outside the kernel. Delivered next tick.
+
+        Outside input crosses the same topic floors as cell emissions: below
+        the floor it is logged as ``blocked`` and never enters the queue.
+        """
         if trust >= Trust.KERNEL:
             raise ValueError("outside input cannot claim KERNEL trust")
+        floor = self.topic_floor.get(topic)
+        if floor is not None and trust < floor:
+            self._log("blocked", sender=sender, topic=topic, trust=trust.name, needs=floor.name)
+            return None
         signal = self._make(topic, payload, Kind.EXCITE, sender, trust, ttl)
         self.queue.append(signal)
         self._log("inject", **signal.to_dict())

@@ -87,6 +87,26 @@ def test_budget_guard_caps_calls_across_restarts(tmp_path):
     assert json.loads(ledger.read_text()) == {"calls": 2, "cost": 4.0}
 
 
+def test_budget_guard_cost_cap_reserves_before_calling(tmp_path):
+    # Regression (PR review): a cap of 1 must not allow a call that may cost 5.
+    inner = Counting(cost=5.0)
+    guard = BudgetGuard(inner, tmp_path / "spend.json", max_calls=10, max_cost=1.0, max_cost_per_call=5.0)
+    with pytest.raises(BrainUnavailable):
+        guard.classify("a", "", LABELS)
+    assert inner.calls == 0
+    roomy = BudgetGuard(Counting(cost=2.0), tmp_path / "roomy.json", max_calls=10, max_cost=6.0, max_cost_per_call=3.0)
+    roomy.classify("a", "", LABELS)
+    roomy.classify("b", "", LABELS)
+    with pytest.raises(BrainUnavailable):  # 4 spent + 3 reserved > 6
+        roomy.classify("c", "", LABELS)
+    assert json.loads((tmp_path / "roomy.json").read_text()) == {"calls": 2, "cost": 4.0}
+
+
+def test_budget_guard_requires_per_call_ceiling_for_cost_caps(tmp_path):
+    with pytest.raises(ValueError):
+        BudgetGuard(Counting(), tmp_path / "s.json", max_calls=1, max_cost=10.0)
+
+
 def test_budget_guard_counts_failed_attempts(tmp_path):
     guard = BudgetGuard(OfflineBrain(), tmp_path / "spend.json", max_calls=1)
     with pytest.raises(BrainUnavailable):

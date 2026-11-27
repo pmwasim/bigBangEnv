@@ -305,8 +305,20 @@ class BudgetGuard:
     across runs. Over budget, the brain is simply unavailable.
     """
 
-    def __init__(self, inner: Brain, ledger: str | Path, *, max_calls: int, max_cost: float = float("inf")):
+    def __init__(
+        self,
+        inner: Brain,
+        ledger: str | Path,
+        *,
+        max_calls: int,
+        max_cost: float = float("inf"),
+        max_cost_per_call: float | None = None,
+    ):
+        if max_cost != float("inf") and max_cost_per_call is None:
+            # A cost cap is only enforceable if the worst case of one call is known up front.
+            raise ValueError("a finite max_cost needs max_cost_per_call (the most one call can cost)")
         self.inner, self.ledger, self.max_calls, self.max_cost = inner, Path(ledger), max_calls, max_cost
+        self.max_cost_per_call = max_cost_per_call or 0.0
         self.name = f"guarded:{getattr(inner, 'name', 'brain')}"
 
     def _load(self) -> dict[str, float]:
@@ -316,13 +328,17 @@ class BudgetGuard:
 
     def classify(self, title: str, body: str, labels: tuple[str, ...]) -> Thought:
         spent = self._load()
-        if spent["calls"] >= self.max_calls or spent["cost"] >= self.max_cost:
+        reserve = self.max_cost_per_call
+        if spent["calls"] >= self.max_calls or spent["cost"] + reserve > self.max_cost:
             raise BrainUnavailable(f"budget exhausted: {spent['calls']} calls, {spent['cost']} units")
-        spent["calls"] += 1  # count the attempt before calling: failures still cost credits
+        # Reserve the worst case before calling (a crash mid-call still leaves it charged),
+        # then settle to the actual cost. Failed attempts keep their reservation.
+        spent["calls"] += 1
+        spent["cost"] = round(spent["cost"] + reserve, 3)
         self.ledger.parent.mkdir(parents=True, exist_ok=True)
         self.ledger.write_text(json.dumps(spent))
         thought = self.inner.classify(title, body, labels)
-        spent["cost"] = round(spent["cost"] + thought.cost, 3)
+        spent["cost"] = round(spent["cost"] - reserve + thought.cost, 3)
         self.ledger.write_text(json.dumps(spent))
         return thought
 
