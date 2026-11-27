@@ -269,6 +269,8 @@ class CachedBrain:
                 if line.strip():
                     entry = json.loads(line)
                     self.store[entry["key"]] = entry
+        if inner is None and self.store:
+            self.name = f"cached:{next(iter(self.store.values()))['brain']}"
 
     @staticmethod
     def key(brain: str, title: str, body: str, labels: tuple[str, ...]) -> str:

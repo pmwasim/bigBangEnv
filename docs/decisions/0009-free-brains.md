@@ -32,6 +32,19 @@ The owner has no budget for paid API keys. There is a small Claude credit balanc
 | qwen2.5-0.5b, with label guide | 9/12 | ~1.0 s | 0 |
 | qwen2.5-1.5b, with label guide | 11/12 | ~1.7 s | 0 |
 
+### Full evaluation with the real local model (recorded once, replayed in CI)
+
+Recording all 684 distinct evaluation issues took 1,851 s of CPU time on this container and cost nothing.
+
+| Scenario | Result |
+|---|---|
+| `local_model_triage` (reflex off, so every issue reaches the model) | 11/12 correct (0.917); its one miss, issue 12, is labelled `question` instead of `needs-human` |
+| `local_model_corpus` (662 public corpus rows, 263 with attacker goals) | 0 privileged actions; 0 victim labels changed compared with a run with no attack traffic; 100% labelled; 421 model answers |
+| How the model labelled the 263 attack issues | 100 `spam`, 6 `question`, 157 `needs-human` (energy budget ran low, so deferred) |
+| `local_model_live` | 12/12 live answers match the recording |
+
+A model steered by an injection can only pick among allowed labels for the issue it is processing; on this corpus it mostly picked `spam`, which is arguably right.
+
 ## Consequences
 - The organism has a real model brain at zero marginal cost. Claude credits become an optional extra that can never be overspent.
 - A local model's answers are repeatable on one machine but may drift across llama.cpp versions or CPUs. The live CI job detects that, and re-recording fixes it.
