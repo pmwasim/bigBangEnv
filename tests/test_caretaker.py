@@ -50,11 +50,11 @@ def test_motor_holds_actions_for_preflight_veto():
 
         def step(self, ctx):
             for s in ctx.inbox:
-                ctx.inhibit(s.topic, ttl=3)
+                ctx.veto(s.topic, [s.id], ttl=3)
 
     k = big_bang(Guard("guard"), Motor("motor", ledger.effectors()))
     k.inject("action.close", {"issue": 1}, trust=Trust.OPERATOR)
-    k.run(4)
+    k.run(10)  # a veto is final: the action never runs, however long we wait
     assert ledger.data["history"] == []
     assert k.cells["motor"].memory["vetoed"] == 1
 
@@ -73,9 +73,10 @@ def test_motor_reports_effector_failures_as_outcomes():
 def test_defense_forbidden_verbs_are_vetoed():
     d = Defense("defense", forbidden=("delete",))
     k = big_bang(d)
-    k.inject("action.delete", {"issue": 1}, trust=Trust.OPERATOR)
+    signal = k.inject("action.delete", {"issue": 1}, trust=Trust.OPERATOR)
     k.run(2)
-    assert k.is_inhibited("action.delete")
+    assert k.is_vetoed(signal.id, "action.delete")
+    assert not k.is_inhibited("action.delete")  # only that action is stopped, not the verb's topic
 
 
 def test_owner_label_is_not_overridden_by_triage():
@@ -116,6 +117,7 @@ def test_cells_keep_work_they_cannot_afford_yet():
 
 def test_permanent_refusals_are_not_retried_forever():
     kernel, ledger = build()
+    kernel.cells["commander"].accepts = Trust.WORLD  # open the receptor so the floor is what refuses it
     kernel.inject("owner.command", "close 1", trust=Trust.WORLD)  # blocked by the floor, fuel is fine
     kernel.run(5)
     assert kernel.cells["commander"].memory["backlog"] == []

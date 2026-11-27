@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,19 @@ def topic_matches(pattern: str, topic: str) -> bool:
     if pattern in ("*", topic):
         return True
     return pattern.endswith(".*") and topic.startswith(pattern[:-1])
+
+
+def _veto_ids(signal: Signal) -> frozenset[int] | None:
+    """The ids a veto names, or None for a plain (topic-wide) inhibition."""
+    payload = signal.payload
+    if isinstance(payload, dict) and isinstance(payload.get("veto"), list):
+        return frozenset(i for i in payload["veto"] if isinstance(i, int))
+    return None
+
+
+def _vetoes(veto: Signal, signal: Signal) -> bool:
+    ids = _veto_ids(veto)
+    return ids is not None and signal.id in ids and topic_matches(veto.topic, signal.topic)
 
 
 def validate_schema(payload: Any, schema: dict[str, Any]) -> str | None:
@@ -81,9 +94,14 @@ class Kernel:
       * topics can require a minimum trust; inhibit signals are exempt (fail-safe)
       * declassification only for granted cells and closed-schema payloads
       * every step, emission and declared spend costs energy; empty budgets mean dormancy
-      * inhibit signals cancel pending excite signals on matching topics for their TTL
+      * inhibit signals pause pending excite signals on matching topics for their TTL;
+        paused signals don't age, and are delivered once the inhibition lifts
+      * a veto names signal ids and cancels exactly those signals (ADR-0010)
       * a cell that raises is rolled back and quarantined; the kernel keeps running
       * signals expire after their TTL; the kill switch is held outside all cells
+      * taint leaves a residue: once a cell consumes input of trust T, its
+        later emissions stay at or below T (only declassification lifts it), and
+        a cell's receptor (``accepts``) refuses excite input below a chosen trust
     """
 
     EMIT_COST = 1.0
@@ -95,6 +113,7 @@ class Kernel:
         self.dormant: set[str] = set()
         self.quarantined: set[str] = set()
         self.topic_floor: dict[str, Trust] = {}
+        self.taint: dict[str, Trust] = {}  # residue: lowest trust each cell has consumed
         self.queue: list[Signal] = []
         self.trace: list[dict[str, Any]] = []
         self.halted = False
@@ -170,11 +189,19 @@ class Kernel:
             else:
                 live.append(signal)
 
-        inhibitors = [s.topic for s in live if s.kind is Kind.INHIBIT]
-        pending: list[Signal] = []
+        pauses = [s.topic for s in live if s.kind is Kind.INHIBIT and _veto_ids(s) is None]
+        vetoes = [s for s in live if s.kind is Kind.INHIBIT and _veto_ids(s) is not None]
+        pending: list[Signal] = []  # deliverable excite signals, plus live inhibit signals
+        held: list[Signal] = []  # paused: kept in the queue, not delivered, not aged
         for signal in live:
-            if signal.kind is Kind.EXCITE and any(topic_matches(p, signal.topic) for p in inhibitors):
+            if signal.kind is Kind.INHIBIT:
+                pending.append(signal)
+            elif any(_vetoes(v, signal) for v in vetoes):
                 self._log("cancel", id=signal.id, topic=signal.topic)
+            elif any(topic_matches(p, signal.topic) for p in pauses):
+                if not signal.held:
+                    self._log("hold", id=signal.id, topic=signal.topic)
+                held.append(replace(signal, held=signal.held + 1))
             else:
                 pending.append(signal)
 
@@ -189,18 +216,23 @@ class Kernel:
                 self.dormant.add(name)
                 self._log("dormant", cell=name)
                 continue
-            inbox = [
+            matching = [
                 s for s in pending
                 if s.kind is Kind.EXCITE and any(topic_matches(p, s.topic) for p in cell.subscriptions)
             ]
-            delivered.update(s.id for s in inbox)
+            inbox = [s for s in matching if s.trust >= cell.accepts]
+            for s in matching:
+                if s.trust < cell.accepts:  # the receptor absorbs it, so it leaves no residue
+                    self._log("blocked", cell=cell.name, topic=s.topic, trust=s.trust.name,
+                              needs=cell.accepts.name, why="receptor")
+            delivered.update(s.id for s in matching)
             self._run_cell(cell, inbox)
 
-        # Delivered excite signals are consumed; inhibit signals persist
-        # until they expire. New emissions become visible next tick.
+        # Delivered excite signals are consumed; inhibit and paused signals
+        # persist until they expire or lift. New emissions become visible next tick.
         self.queue = [
             s for s in pending if s.kind is Kind.INHIBIT or s.id not in delivered
-        ] + self._outbox
+        ] + held + self._outbox
         self._outbox = []
 
     def _run_cell(self, cell: Cell, inbox: list[Signal]) -> None:
@@ -208,8 +240,13 @@ class Kernel:
         mark = len(self._outbox)
         try:
             saved = json.dumps(cell.memory)
-            cell.step(Context(self, cell, inbox))
+            ctx = Context(self, cell, inbox)
+            cell.step(ctx)
             json.dumps(cell.memory)  # matter must stay serializable
+            if ctx.trust < self.taint.get(cell.name, cell.trust):
+                # The step committed, so whatever it consumed may now live in its matter.
+                self.taint[cell.name] = ctx.trust
+                self._log("taint", cell=cell.name, trust=ctx.trust.name)
         except Exception as exc:  # noqa: BLE001 - isolation boundary
             rolled_back = [s.id for s in self._outbox[mark:]]
             del self._outbox[mark:]
@@ -230,8 +267,18 @@ class Kernel:
             self.step()
 
     def is_inhibited(self, topic: str) -> bool:
+        """True while a live inhibition pauses ``topic``. Vetoes don't count: they name signals."""
         return any(
-            s.kind is Kind.INHIBIT and topic_matches(s.topic, topic) and not s.expired(self.tick)
+            s.kind is Kind.INHIBIT and _veto_ids(s) is None and topic_matches(s.topic, topic)
+            and not s.expired(self.tick)
+            for s in self.queue + self._outbox
+        )
+
+    def is_vetoed(self, signal_id: int, topic: str) -> bool:
+        """True while a live veto names ``signal_id`` on a topic matching ``topic``."""
+        probe = Signal(signal_id, topic, None, Kind.EXCITE, "", Trust.WORLD, self.tick, 0)
+        return any(
+            s.kind is Kind.INHIBIT and _vetoes(s, probe) and not s.expired(self.tick)
             for s in self.queue + self._outbox
         )
 
@@ -296,6 +343,7 @@ class Kernel:
                     "spent": self.budgets[name].spent,
                     "dormant": name in self.dormant,
                     "quarantined": name in self.quarantined,
+                    **({"taint": self.taint[name].name} if name in self.taint else {}),
                 }
                 for name, cell in self.cells.items()
             },
@@ -310,10 +358,12 @@ class Kernel:
         self._next_id = snap["next_id"]
         self.halted = snap["halted"]
         self.queue = [Signal.from_dict(s) for s in snap["queue"]]
-        self.dormant, self.quarantined = set(), set()
+        self.dormant, self.quarantined, self.taint = set(), set(), {}
         for name, state in snap["cells"].items():
             self.cells[name].memory = json.loads(json.dumps(state["memory"]))
             self.budgets[name].spent = state["spent"]
+            if "taint" in state:
+                self.taint[name] = Trust[state["taint"]]
             if state["dormant"]:
                 self.dormant.add(name)
             if state.get("quarantined"):

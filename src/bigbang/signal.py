@@ -23,7 +23,9 @@ class Trust(IntEnum):
 
 class Kind(str, Enum):
     EXCITE = "excite"  # "do / consider this"
-    INHIBIT = "inhibit"  # "stop": cancels pending excite signals on the topic
+    # "wait": pauses pending excite signals on the topic. A veto is an inhibit
+    # that names signal ids; it cancels those signals and nothing else.
+    INHIBIT = "inhibit"
 
 
 @dataclass(frozen=True)
@@ -36,14 +38,17 @@ class Signal:
     trust: Trust
     born: int  # tick at which the signal was emitted
     ttl: int  # ticks the signal stays alive after birth
+    held: int = 0  # ticks spent paused by an inhibition; they don't age the signal
 
     def expired(self, tick: int) -> bool:
-        return tick - self.born > self.ttl
+        return tick - self.born - self.held > self.ttl
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["kind"] = self.kind.value
         data["trust"] = self.trust.name
+        if not self.held:
+            del data["held"]  # keep the trace unchanged for signals that were never paused
         return data
 
     @classmethod
@@ -57,4 +62,5 @@ class Signal:
             trust=Trust[data["trust"]],
             born=data["born"],
             ttl=data["ttl"],
+            held=data.get("held", 0),
         )

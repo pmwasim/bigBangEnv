@@ -23,7 +23,7 @@
 
 1. `tick += 1`; every budget **regenerates** by its `regen`; dormant cells that can afford a step **wake**.
 2. **Decay:** signals older than their TTL are dropped (`expire`).
-3. **Inhibition:** every live `INHIBIT` signal cancels pending `EXCITE` signals on matching topics (`cancel`). Inhibit signals persist until they expire.
+3. **Inhibition and veto:** a live `INHIBIT` signal pauses pending `EXCITE` signals on matching topics (`hold`): they stay queued, don't age, and are delivered once it lifts. A veto names signal ids and cancels exactly those (`cancel`). Inhibit signals persist until they expire (ADR-0010).
 4. **Metabolism:** live cells are stepped in name order (deterministic). Each step costs `step_cost`; a cell that can't pay becomes **dormant**. Quarantined cells are skipped.
 5. **Delivery:** a cell receives live excite signals on matching subscriptions (`topic`, `prefix.*`, `*`); delivered signals are consumed.
 6. **Atomic step:** if the cell raises, or leaves unserializable memory, its memory and this tick's emissions are rolled back and it is **quarantined**.
@@ -41,7 +41,10 @@
 | Declassify: grant + closed schema only | `_declassify` | `denied` / `declassify` | `test_declassify_*` |
 | Emissions, steps and declared spend cost energy | `_emit`, `step`, `_spend` | `denied`, `dormant` | `test_spend_*`, `test_energy_*` |
 | Regeneration and wake | `step` | `wake` | `test_regeneration_wakes_dormant_cells` |
-| Wildcard inhibition cancels pending signals | `step` | `cancel` | `test_wildcard_inhibition_cancels_whole_subtree` |
+| Wildcard inhibition pauses pending signals; held time doesn't age them | `step` | `hold` | `test_wildcard_inhibition_cancels_whole_subtree`, `test_inhibition_holds_pending_signals_until_it_lifts` |
+| A veto cancels only the signals it names | `step`, `is_vetoed` | `cancel` | `test_veto_cancels_only_the_named_signal` |
+| Taint residue: a cell stays at or below the lowest trust it consumed in a committed step | `Context.__init__`, `_run_cell` | `taint`, `blocked` | `test_stored_world_input_keeps_its_taint_on_a_later_tick`, `test_taint_*` |
+| Receptors absorb excite input below a cell's `accepts` | `step` | `blocked` (`why=receptor`) | `test_owner_commands_still_work_after_world_input_on_the_command_topic` |
 | Atomic steps, quarantine, revive | `_run_cell`, `revive` | `quarantine`, `revive` | `test_crashing_cell_*`, `test_revive_*` |
 | TTL decay | `step` | `expire` | `test_signals_expire_after_ttl` |
 | External kill switch | `halt` | `halt` | `test_kill_switch_stops_the_kernel` |
@@ -49,8 +52,8 @@
 
 ## Reusable lineages (`lineages.py`)
 
-- **Motor:** executes `action.<verb>` through host-supplied effectors after a pre-flight hold, and reports `outcome.<verb>` (`done` / `vetoed` / `failed`). Effector exceptions become `failed` outcomes, not crashes.
-- **Defense:** a deterministic guardian. It locks down on a rate limit (`action.*`), breaks loops (the same action more than N times in a window) and vetoes forbidden verbs.
+- **Motor:** executes `action.<verb>` through host-supplied effectors after a pre-flight hold, and reports `outcome.<verb>` (`done` / `vetoed` / `failed` / `expired`). Effector exceptions become `failed` outcomes, not crashes. An inhibited action waits and resumes when the inhibition lifts, at most `resume_per_tick` per tick; one paused longer than `patience` ticks reports `expired`. Only a veto discards an action.
+- **Defense:** a deterministic guardian. It pauses everything on a rate limit (`action.*` lockdown), vetoes the extra copies of a repeated action (same topic and payload more than N times in a window), and vetoes forbidden verbs by id.
 
 ## The caretaker organism (`apps/caretaker.py`)
 
@@ -67,9 +70,9 @@ owner.command ─▶ commander ────────────────�
 | perception | sensory | emits `issue.new` | validate ids/types, truncate, de-duplicate |
 | reflex | reflex | declassify | label tagged/spam issues with no brain |
 | reasoner | reasoning | declassify, own budget | brain-classify novel issues; `needs-human` on outage or low fuel; anything it can't afford to emit waits in a persisted backlog |
-| commander | motor-planning | OPERATOR ceiling | parse owner commands (`close N`, `reopen N`, `label N L`) |
-| defense | defense | may inhibit `action.*` | rate limit, loop breaker, forbidden verbs |
-| motor | motor | emits `outcome.*` | hold, then execute through the ledger effectors |
+| commander | motor-planning | OPERATOR ceiling, accepts OWNER only | parse owner commands (`close N`, `reopen N`, `label N L`) |
+| defense | defense | may inhibit and veto `action.*` | rate-limit lockdown (pause), loop breaker and forbidden verbs (veto) |
+| motor | motor | emits `outcome.*` | hold, then execute through the ledger effectors; after a lockdown, resume at Defense's sustained rate |
 | journal | housekeeping | emits nothing | outcome statistics |
 
 Laws: `action.label`, `action.close` and `action.reopen` require OPERATOR. Owner commands enter at OWNER trust; issues enter at WORLD. Automatic labels never override an existing label.
