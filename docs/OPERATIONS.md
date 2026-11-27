@@ -32,7 +32,27 @@ bigbang replay --state S                                    # verify a single-se
 bigbang eval --out docs/EVALUATION.md                       # M1 exit-criteria suite
 ```
 
-Use `--brain claude` (needs `pip install -e ".[claude]"` and Anthropic credentials) to run the reasoner on Claude; the default is `claude-opus-5-5` at low effort, and `--model` changes it. `--brain offline` simulates an outage.
+### Choosing a brain (no budget needed)
+
+| `--brain` | What runs | Cost |
+|---|---|---|
+| `rule` (default) | Keyword rules | Free |
+| `free` | Local model (cached), then rules | Free: CPU time only |
+| `local` | Local model only | Free: CPU time only |
+| `cascade --claude-max-calls N` | Local model, then Claude capped at N calls in total, then rules | At most N Claude calls, ever, for this state dir |
+| `claude` | Claude only, uncapped | Paid; avoid without a budget |
+| `offline` | Nothing (simulates an outage) | Free |
+
+Set up the free local model once:
+
+```bash
+pip install -e ".[local]"          # builds llama.cpp (a few minutes)
+bigbang model pull                 # Qwen2.5-1.5B q4_k_m, 1.1 GB, sha256-verified
+bigbang model list
+bigbang run --state S --issues I --brain free --ticks 100
+```
+
+Answers from `free` and `cascade` are recorded in `S/answers.jsonl` and never asked twice. Claude spending is recorded in `S/claude-spend.json`; the cap holds across restarts. `--model qwen2.5-0.5b` picks the smaller, faster, less accurate model.
 
 ## Incident playbook
 

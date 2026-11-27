@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 from . import __version__
@@ -18,8 +19,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     from .runtime import Runner
 
     config: dict[str, Any] = {"brain": args.brain}
-    if args.model:
-        config["brain_options"] = {"model": args.model}
+    options: dict[str, Any] = {}
+    if args.brain == "claude" and args.model:
+        options["model"] = args.model
+    if args.brain in ("local", "free", "cascade") and args.model:
+        options["model"] = args.model
+    if args.brain == "cascade":
+        options["claude_max_calls"] = args.claude_max_calls
+        options["claude_ledger"] = str(Path(args.state) / "claude-spend.json")
+    if args.brain in ("free", "cascade"):
+        options["cache"] = str(Path(args.state) / "answers.jsonl")
+    config["brain_options"] = options
     if args.no_reflex:
         config["reflex"] = False
     runner = Runner(
@@ -72,10 +82,22 @@ def cmd_replay(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def cmd_model(args: argparse.Namespace) -> int:
+    from .brains import LOCAL_MODELS, download_model, model_path
+
+    if args.action == "pull":
+        print(f"model ready: {download_model(args.model)}")
+    else:
+        for name, (repo, filename, _) in LOCAL_MODELS.items():
+            path = model_path(name)
+            print(f"{name:<14} {'present' if path.exists() else 'missing':<8} {repo}/{filename}")
+    return 0
+
+
 def cmd_eval(args: argparse.Namespace) -> int:
     from .evaluation import run_suite, to_markdown
 
-    suite = run_suite()
+    suite = run_suite(live=args.live)
     if args.json:
         _print(suite)
     else:
@@ -95,8 +117,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--state", required=True, help="state directory")
     run.add_argument("--issues", help="directory of issue *.json files (WORLD trust)")
     run.add_argument("--commands", help="owner command file, one per line (OWNER trust)")
-    run.add_argument("--brain", default="rule", choices=["rule", "offline", "claude"])
-    run.add_argument("--model", help="model for --brain claude (default claude-opus-5-5)")
+    run.add_argument("--brain", default="rule", choices=["rule", "offline", "local", "free", "cascade", "claude"],
+                     help="free = cached local model then rules (no cost); cascade = free + capped Claude")
+    run.add_argument("--model", help="local model name (qwen2.5-1.5b, qwen2.5-0.5b) or Claude model id")
+    run.add_argument("--claude-max-calls", type=int, default=0,
+                     help="hard cap on Claude calls for --brain cascade, persisted in the state dir")
     run.add_argument("--no-reflex", action="store_true", help="disable the fast spine")
     run.add_argument("--ticks", type=int, default=50)
     run.add_argument("--forever", action="store_true", help="run until a HALT file appears")
@@ -130,8 +155,14 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--state", required=True)
     rp.set_defaults(func=cmd_replay)
 
-    ev = sub.add_parser("eval", help="run the M1 evaluation suite")
+    md = sub.add_parser("model", help="manage free local models")
+    md.add_argument("action", choices=["pull", "list"])
+    md.add_argument("--model", default="qwen2.5-1.5b")
+    md.set_defaults(func=cmd_model)
+
+    ev = sub.add_parser("eval", help="run the evaluation suite")
     ev.add_argument("--json", action="store_true")
+    ev.add_argument("--live", action="store_true", help="also check live local-model answers (needs the model)")
     ev.add_argument("--out", help="also write the markdown report here")
     ev.set_defaults(func=cmd_eval)
     return parser

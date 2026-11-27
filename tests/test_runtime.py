@@ -101,6 +101,19 @@ def test_cli_end_to_end(tmp_path, capsys):
     assert "declassify" in out and "OK: identical" in out
 
 
+def test_cli_model_list(capsys):
+    assert main(["model", "list"]) == 0
+    out = capsys.readouterr().out
+    assert "qwen2.5-1.5b" in out and "Qwen/Qwen2.5-1.5B-Instruct-GGUF" in out
+
+
+def test_skipped_scenarios_render_as_skipped():
+    from bigbang.evaluation import _skipped, to_markdown
+
+    md = to_markdown({"passed": True, "scenarios": [_skipped("x", "claim", "no model")]})
+    assert "| x | claim | skipped |" in md
+
+
 def test_cli_eval(tmp_path, capsys):
     out_file = tmp_path / "eval.md"
     assert main(["eval", "--out", str(out_file)]) == 0

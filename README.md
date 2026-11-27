@@ -29,8 +29,10 @@ These are mechanism tests with a deterministic stand-in brain, not real-world qu
 
 ## Quick start
 
+No API key is needed anywhere. The real-model brain is a free local model, Qwen2.5-1.5B on the CPU; Claude is optional and capped ([ADR-0009](docs/decisions/0009-free-brains.md)).
+
 ```bash
-pip install -e ".[dev]"            # add ,claude for the Claude brain
+pip install -e ".[dev]"            # add ,local for the free local model, ,claude for capped Claude
 pytest                             # 57 tests
 bigbang eval                       # M1 exit-criteria suite
 python examples/first_light.py     # the kernel law in 40 lines
