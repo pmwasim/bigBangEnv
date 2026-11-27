@@ -46,7 +46,9 @@ bigbang eval --out docs/EVALUATION.md                       # M1 exit-criteria s
 Set up the free local model once:
 
 ```bash
-pip install -e ".[local]"          # builds llama.cpp (a few minutes)
+pip install -e ".[local]"          # builds llama.cpp for this machine's CPU (a few minutes)
+# Shipping the build to other machines (CI caches, containers)? Build it portable instead:
+#   CMAKE_ARGS="-DGGML_NATIVE=OFF" pip install --no-cache-dir -e ".[local]"
 bigbang model pull                 # Qwen2.5-1.5B q4_k_m, 1.1 GB, sha256-verified
 bigbang model list
 bigbang run --state S --issues I --brain free --ticks 100

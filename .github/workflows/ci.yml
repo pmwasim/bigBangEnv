@@ -43,14 +43,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-          cache: pip
       - name: Cache model
         uses: actions/cache@v4
         with:
           path: ~/.cache/bigbang/models
           key: bigbang-model-qwen2.5-1.5b-q4_k_m
-      - name: Install (builds llama.cpp)
-        run: pip install -e ".[dev,local]"
+      # Build llama.cpp for a portable CPU target. A native (-march=native) build
+      # crashes with "Illegal instruction" when reused on a runner with a different CPU.
+      - name: Install (builds llama.cpp, portable)
+        env:
+          CMAKE_ARGS: "-DGGML_NATIVE=OFF"
+        run: pip install --no-cache-dir -e ".[dev,local]"
       - name: Pull model (verified by sha256)
         run: bigbang model pull --model qwen2.5-1.5b
       - name: Live evaluation
