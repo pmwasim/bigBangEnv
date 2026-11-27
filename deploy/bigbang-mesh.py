@@ -12,7 +12,7 @@ from typing import Any
 
 
 def run_cmd(cmd: list[str], check: bool = True, capture: bool = True) -> str:
-    res = subprocess.run(cmd, text=True, capture_output=capture, check=check)
+    res = subprocess.run(cmd, stdin=subprocess.DEVNULL, text=True, capture_output=capture, check=check)
     return res.stdout.strip() if capture else ""
 
 
