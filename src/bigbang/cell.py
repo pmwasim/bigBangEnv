@@ -30,6 +30,7 @@ class Cell:
         trust: Trust = Trust.OPERATOR,
         emits: Iterable[str] | None = None,
         declassify: bool = False,
+        accepts: Trust = Trust.WORLD,
     ) -> None:
         if trust >= Trust.KERNEL:
             raise ValueError("cells cannot hold KERNEL trust")
@@ -37,6 +38,9 @@ class Cell:
         self.trust = trust  # ceiling: emitted signals never exceed it
         self.emits = frozenset(emits) if emits is not None else None  # None = any topic
         self.declassify = declassify  # operator grant; see ADR-0005
+        # Receptor: excite signals below this trust are never delivered, so they
+        # can't leave a taint residue in the cell (ADR-0010).
+        self.accepts = accepts
         self.memory: dict[str, Any] = {}
 
     def step(self, ctx: Context) -> None:  # pragma: no cover - abstract
@@ -51,8 +55,10 @@ class Context:
         self._cell = cell
         self.inbox = inbox
         # Taint propagation: output can be no more trusted than the cell's
-        # ceiling or the least-trusted input it consumed this tick.
-        self.trust = min([cell.trust, *(s.trust for s in inbox)])
+        # ceiling, the least-trusted input it consumes this tick, or the
+        # residue of anything it consumed before (it may still be in its matter).
+        residue = kernel.taint.get(cell.name, cell.trust)
+        self.trust = min([cell.trust, residue, *(s.trust for s in inbox)])
 
     @property
     def tick(self) -> int:
@@ -64,7 +70,12 @@ class Context:
         return self._kernel.budgets[self._cell.name].remaining
 
     def is_inhibited(self, topic: str) -> bool:
+        """True while ``topic`` is paused by an inhibition."""
         return self._kernel.is_inhibited(topic)
+
+    def is_vetoed(self, signal_id: int, topic: str) -> bool:
+        """True while a live veto names this signal."""
+        return self._kernel.is_vetoed(signal_id, topic)
 
     def emit(self, topic: str, payload: Any = None, *, ttl: int = 3) -> Signal | None:
         return self._kernel._emit(self._cell, topic, payload, Kind.EXCITE, ttl, self.trust)
@@ -76,7 +87,14 @@ class Context:
         return self._kernel._declassify(self._cell, topic, payload, schema, ttl, self.trust)
 
     def inhibit(self, topic: str, *, ttl: int = 3, reason: str = "") -> Signal | None:
-        return self._kernel._emit(self._cell, topic, reason, Kind.INHIBIT, ttl, self.trust)
+        """Pause excite signals on ``topic`` (wildcards allowed) for ``ttl`` ticks."""
+        return self._kernel._emit(self._cell, topic, str(reason), Kind.INHIBIT, ttl, self.trust)
+
+    def veto(self, topic: str, signal_ids: Iterable[int], *, ttl: int = 3, reason: str = "") -> Signal | None:
+        """Cancel the named excite signals on ``topic``; other signals on the topic are untouched."""
+        ids = sorted({int(i) for i in signal_ids})
+        payload = {"veto": ids, "reason": str(reason)}
+        return self._kernel._emit(self._cell, topic, payload, Kind.INHIBIT, ttl, self.trust)
 
     def spend(self, units: float, reason: str = "") -> bool:
         """Declare work (e.g. LLM tokens) against this cell's budget."""

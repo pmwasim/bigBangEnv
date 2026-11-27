@@ -185,7 +185,10 @@ def replay_trace(trace: list[dict[str, Any]], config: dict[str, Any]) -> tuple[b
     injects: dict[int, list[dict[str, Any]]] = {}
     halt: dict[str, Any] | None = None
     for record in trace:
-        if record["event"] == "inject":
+        # Outside input refused by a topic floor is logged only as `blocked` (with a
+        # sender, no cell). Re-offer it so the kernel refuses it again in the same place.
+        refused = record["event"] == "blocked" and "sender" in record and "cell" not in record
+        if record["event"] == "inject" or refused:
             injects.setdefault(record["tick"], []).append(record)
         elif record["event"] == "halt":
             halt = record
@@ -195,7 +198,9 @@ def replay_trace(trace: list[dict[str, Any]], config: dict[str, Any]) -> tuple[b
             kernel.halt(halt["reason"])
             break
         for r in injects.get(tick, []):
-            kernel.inject(r["topic"], r["payload"], trust=_trust(r["trust"]), sender=r["sender"], ttl=r["ttl"])
+            # A refused attempt never recorded its payload; the kernel refuses it before reading one.
+            kernel.inject(r["topic"], r.get("payload"), trust=_trust(r["trust"]), sender=r["sender"],
+                          ttl=r.get("ttl", 3))
         if tick < final_tick:
             kernel.step()
     return diff_traces(_normalise(trace), _normalise(kernel.trace))

@@ -62,7 +62,8 @@ Answers from `free` and `cascade` are recorded in `S/answers.jsonl` and never as
 |---|---|---|
 | A cell has `quarantined: true`; `quarantine` event with an error | The cell raised; its tick was rolled back | Fix the bug, then `revive` it |
 | A cell has `dormant: true` | Out of energy | Raise `regen`, or `revive --refuel N` |
-| `defense.mode = lockdown`; many `cancel` events | Rate limit hit; all actions vetoed for `lockdown_ttl` | Find the noisy source in `trace --event emit`; lockdown lifts by itself |
+| `defense.mode = lockdown`; many `hold` events | Rate limit hit; all actions paused for `lockdown_ttl` | Nothing is lost: paused actions resume after the lockdown at Defense's sustained rate. Find the noisy source in `trace --event emit` |
+| `motor.expired` above 0 | An action stayed paused longer than Motor's `patience` | Check its `outcome.*:expired` report and re-issue it if it is still wanted |
 | Many `blocked` events | Low-trust data tried to reach a protected topic | Expected under attack; check the senders |
 | `reasoner.outages` rising | Brain unavailable | The organism degrades to `needs-human`; check credentials/network |
 | `replay` prints MISMATCH | Non-determinism, or a multi-session trace | Expected after resume/revive or with `--brain claude` |

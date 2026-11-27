@@ -34,7 +34,7 @@ The industry is building smarter *cells in a vacuum* (better prompts, bigger mod
 | V3 | **LLM as organ** | Reasoning cells are one lineage among several; dormant by default |
 | V4 | **Sensed scarcity** | Remaining budget is an input every cell can read, not just an external kill |
 | V5 | **Continuity in time** | Cells live across ticks with persistent state, without needing a prompt |
-| V6 | **Inhibition is first-class** | "Stop/veto" is a kernel primitive that cancels pending action |
+| V6 | **Inhibition is first-class** | "Wait" pauses pending action and "veto" cancels a named action; both are kernel primitives |
 | V7 | **Graceful degradation** | Losing the LLM must degrade to safe reflexes, not collapse |
 | V8 | **Learning by compilation** | Repeated reasoning can harden into cheap reflexes *(research track)* |
 
@@ -58,7 +58,11 @@ The industry is building smarter *cells in a vacuum* (better prompts, bigger mod
 | Energy / Fuel | Metered budget units charged for steps and emissions |
 | Tick / Heartbeat | One deterministic scheduler round |
 | Impulse | A typed, kernel-stamped signal on a topic |
-| Inhibition | A veto signal that cancels pending signals on a topic for its TTL |
+| Inhibition | A signal that pauses pending signals on a topic for its TTL; paused signals don't age and resume when it lifts |
+| Veto | An inhibit signal that names signal ids and cancels exactly those |
+| Taint residue | The lowest trust a cell has consumed; its later emissions can't exceed it (only declassification can) |
+| Receptor | A cell's `accepts` trust: excite input below it is absorbed at delivery and leaves no residue |
+| Graded release | Motor resumes paused actions at a capped rate (`resume_per_tick`) once an inhibition lifts |
 | Provenance / Taint | The trust level stamped on a signal by the kernel |
 | Declassification | Emitting at a cell's own trust despite tainted input; granted cells and closed-schema payloads only |
 | Quarantine | A cell rolled back and suspended after raising; released by `revive` |

@@ -198,6 +198,9 @@ class Commander(Cell):
 
     def __init__(self, name: str = "commander", **kw: Any):
         kw.setdefault("emits", ["action.close", "action.reopen", "action.label"])
+        # Receptor: only the owner speaks here. Without it, one WORLD-trust
+        # command would leave a taint residue that blocks every later one.
+        kw.setdefault("accepts", Trust.OWNER)
         super().__init__(name, **kw)
         self.memory.update(accepted=0, rejected=0, backlog=[], max_backlog=0)
 
@@ -358,7 +361,10 @@ def build(
     )
     kernel.spawn(Commander(), fuel=fuel, regen=regen)
     kernel.spawn(Defense("defense", forbidden=("delete",), **cfg["defense"]), fuel=fuel, regen=regen)
-    kernel.spawn(Motor("motor", ledger.effectors()), fuel=fuel, regen=regen)
+    # After a lockdown, paused work resumes no faster than Defense's own rate limit.
+    defense = {"max_actions": 20, "window": 5, **cfg["defense"]}
+    pace = max(1, defense["max_actions"] // defense["window"])
+    kernel.spawn(Motor("motor", ledger.effectors(), resume_per_tick=pace), fuel=fuel, regen=regen)
     kernel.spawn(Journal(), fuel=fuel, regen=regen)
     for cell, cell_fuel in extra_cells or []:
         kernel.spawn(cell, fuel=cell_fuel, regen=regen)
@@ -389,7 +395,7 @@ def report(kernel: Kernel, ledger: Ledger) -> dict[str, Any]:
             **{k: kernel.cells["reasoner"].memory[k] for k in ("thoughts", "outages", "deferred_low_fuel", "energy", "max_backlog")},
             "backlog": len(kernel.cells["reasoner"].memory["backlog"]),
         },
-        "motor": {k: kernel.cells["motor"].memory[k] for k in ("executed", "vetoed", "failed")},
+        "motor": {k: kernel.cells["motor"].memory.get(k, 0) for k in ("executed", "vetoed", "failed", "expired")},
         "backlogs": {name: len(kernel.cells[name].memory.get("backlog", kernel.cells[name].memory.get("unsent", [])))
                      for name in ("perception", "reflex", "reasoner", "commander", "motor")},
         "defense": {k: kernel.cells["defense"].memory[k] for k in ("mode", "vetoes", "lockdowns")},

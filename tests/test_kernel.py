@@ -114,19 +114,22 @@ def test_signals_expire_after_ttl():
     assert any(e["event"] == "expire" for e in k.trace)
 
 
-def test_inhibition_cancels_pending_signals():
+def test_inhibition_pauses_pending_signals():
+    # ADR-0010: inhibition is a pause, not a kill. A veto (by id) is the kill.
     class Guard(Cell):
         def step(self, ctx):
             if ctx.tick == 1:
-                ctx.inhibit("in", ttl=5, reason="veto")
+                ctx.inhibit("in", ttl=5, reason="pause")
 
     guard, rec = Guard("a_guard"), Recorder("z_rec")
     k = big_bang(guard, rec)
-    k.run(1)  # guard emits the veto at tick 1
+    k.run(1)  # guard emits the inhibition at tick 1
     k.inject("in", "dangerous")
     k.run(3)
     assert rec.memory["seen"] == []
-    assert any(e["event"] == "cancel" for e in k.trace)
+    assert any(e["event"] == "hold" for e in k.trace)
+    k.run(5)
+    assert [s[1] for s in rec.memory["seen"]] == ["dangerous"]
 
 
 def test_emit_capabilities_are_enforced():

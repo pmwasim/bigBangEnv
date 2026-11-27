@@ -69,6 +69,23 @@ def test_replay_matches_single_session(tmp_path):
     assert ok, detail
 
 
+def test_replay_reproduces_outside_input_blocked_by_a_floor():
+    # PR #2 review (Codex): a refused inject is logged only as `blocked`, so replay
+    # used to skip it and diverge. Replay must re-offer the refused attempt too.
+    from bigbang import Trust
+    from bigbang.apps.caretaker import build
+    from bigbang.runtime import replay_trace
+
+    config = {"brain": "rule"}
+    kernel, _ = build(config)
+    assert kernel.inject("action.close", {"issue": 1}, trust=Trust.WORLD) is None
+    kernel.inject("world.issue", {"id": 1, "title": "[bug] x", "body": ""},
+                  trust=Trust.WORLD, sender="issue-feed", ttl=5)
+    kernel.run(5)
+    ok, detail = replay_trace(kernel.trace, config)
+    assert ok, detail
+
+
 def test_replay_refuses_multi_session(tmp_path):
     state = tmp_path / "state"
     Runner(state).run(2)
