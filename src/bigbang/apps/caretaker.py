@@ -308,11 +308,14 @@ class Host:
             for path in sorted(self.issues_dir.glob("*.json")):
                 if path.name in self.state["ingested_files"]:
                     continue
-                self.state["ingested_files"].append(path.name)
                 try:
-                    self.state["pending"].append(json.loads(path.read_text()))
-                except json.JSONDecodeError:
-                    self.state["pending"].append({"invalid": path.name})
+                    issue = json.loads(path.read_bytes().decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    issue = {"invalid": path.name}  # Perception drops it; the run carries on
+                except OSError:
+                    continue  # unreadable right now (e.g. still being written): retry next poll
+                self.state["ingested_files"].append(path.name)
+                self.state["pending"].append(issue)
         if self.commands_file and self.commands_file.exists():
             lines = [ln for ln in self.commands_file.read_text().splitlines() if ln.strip()]
             self.commands = lines

@@ -75,6 +75,20 @@ def test_cache_records_once_then_replays(tmp_path):
         replay.classify("other", "b", LABELS)
 
 
+def test_cache_key_covers_the_whole_body(tmp_path):
+    # Regression (PR review): bodies sharing their first 2,000 characters collided.
+    class Echo:
+        name = "echo"
+
+        def classify(self, title, body, labels):
+            return Thought("bug" if body.endswith("BUG") else "feature", "", 1.0)
+
+    cache = CachedBrain(Echo(), tmp_path / "a.jsonl")
+    prefix = "x" * 2000
+    assert cache.classify("t", prefix + "BUG", LABELS).label == "bug"
+    assert cache.classify("t", prefix + "FEATURE", LABELS).label == "feature"
+
+
 def test_budget_guard_caps_calls_across_restarts(tmp_path):
     ledger = tmp_path / "spend.json"
     inner = Counting(cost=2.0)

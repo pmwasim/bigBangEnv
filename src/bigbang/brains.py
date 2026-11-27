@@ -274,7 +274,9 @@ class CachedBrain:
 
     @staticmethod
     def key(brain: str, title: str, body: str, labels: tuple[str, ...]) -> str:
-        blob = json.dumps([brain, title, body[:MAX_BODY_CHARS], list(labels)], ensure_ascii=False)
+        # Key the full input: brains differ in how much they read (Claude sees the whole
+        # body), so truncating here would let different issues share one answer.
+        blob = json.dumps([brain, title, body, list(labels)], ensure_ascii=False)
         return hashlib.sha256(blob.encode()).hexdigest()
 
     def classify(self, title: str, body: str, labels: tuple[str, ...]) -> Thought:
