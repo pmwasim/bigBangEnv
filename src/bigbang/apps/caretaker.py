@@ -363,7 +363,7 @@ def build(
     kernel.spawn(Defense("defense", forbidden=("delete",), **cfg["defense"]), fuel=fuel, regen=regen)
     # After a lockdown, paused work resumes no faster than Defense's own rate limit.
     defense = {"max_actions": 20, "window": 5, **cfg["defense"]}
-    pace = max(1, defense["max_actions"] // defense["window"])
+    pace = defense["max_actions"] / defense["window"]  # may be below one per tick
     kernel.spawn(Motor("motor", ledger.effectors(), resume_per_tick=pace), fuel=fuel, regen=regen)
     kernel.spawn(Journal(), fuel=fuel, regen=regen)
     for cell, cell_fuel in extra_cells or []:

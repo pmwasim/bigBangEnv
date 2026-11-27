@@ -188,6 +188,29 @@ def test_paused_actions_resume_at_a_graded_pace():
     assert max(per_tick) <= 2
 
 
+def test_paused_actions_resume_no_faster_than_a_sub_one_per_tick_rate():
+    # PR #3 review (Codex): a rate below one per tick was rounded up to one per tick.
+    ledger = Ledger()
+    guard = OnTick("a_guard", 1, lambda ctx: ctx.inhibit("action.*", ttl=4, reason="lockdown"))
+    motor = Motor("motor", ledger.effectors(), resume_per_tick=0.2)  # one per five ticks
+    k = big_bang(guard, motor)
+    for n in range(4):
+        k.inject("action.close", {"issue": n}, trust=Trust.OPERATOR)
+    k.run(1)
+    per_tick = []
+    for _ in range(30):
+        before = motor.memory["executed"]
+        k.step()
+        per_tick.append(motor.memory["executed"] - before)
+    assert sum(per_tick) == 4
+    assert all(sum(per_tick[i:i + 5]) <= 1 for i in range(len(per_tick)))
+
+
+def test_caretaker_resume_rate_follows_a_slow_defense_limit():
+    kernel, _ = build({"defense": {"max_actions": 1, "window": 5, "max_repeats": 2, "lockdown_ttl": 10}})
+    assert kernel.cells["motor"].resume_per_tick == 0.2
+
+
 def test_motor_gives_up_on_a_pause_after_its_patience_and_says_so():
     ledger = Ledger()
     guard = OnTick("a_guard", 1, lambda ctx: ctx.inhibit("action.*", ttl=50, reason="lockdown"))
