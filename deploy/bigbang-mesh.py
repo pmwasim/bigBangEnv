@@ -105,49 +105,27 @@ def cmd_spawn_tier(args: argparse.Namespace) -> int:
 
             # Install bigBangEnv inside container
             print(f"[+] Bootstrapping bigBangEnv kernel inside {c_name}...")
+            branch = getattr(args, "branch", "main")
             setup_script = f"""
 set -euo pipefail
 apt-get update -y >/dev/null 2>&1
-apt-get install -y --no-install-recommends git python3 python3-venv >/dev/null 2>&1
+apt-get install -y --no-install-recommends git python3 python3-venv logrotate >/dev/null 2>&1
 
 useradd --system --shell /usr/sbin/nologin --home-dir /var/lib/bigbang --create-home bigbang || true
 mkdir -p /opt/bigbang /var/lib/bigbang/state /var/lib/bigbang/issues /var/log/bigbang /etc/bigbang
 touch /var/lib/bigbang/commands.txt
 chown -R bigbang:bigbang /var/lib/bigbang /var/log/bigbang
 
-git clone https://github.com/pmwasim/bigBangEnv.git /opt/bigbang/repo >/dev/null 2>&1
+git clone --branch {branch} https://github.com/pmwasim/bigBangEnv.git /opt/bigbang/repo >/dev/null 2>&1
 python3 -m venv /opt/bigbang/venv
 /opt/bigbang/venv/bin/pip install -q --upgrade pip
 /opt/bigbang/venv/bin/pip install -q -e "/opt/bigbang/repo[dev]"
 
-cat << 'EOF' > /etc/bigbang/bigbang.conf
-BIGBANG_STATE_DIR=/var/lib/bigbang/state
-BIGBANG_ISSUES_DIR=/var/lib/bigbang/issues
-BIGBANG_COMMANDS_FILE=/var/lib/bigbang/commands.txt
-BIGBANG_INTERVAL=1.0
-BIGBANG_BRAIN=rule
-BIGBANG_EXTRA_ARGS=""
-EOF
-
-cat << 'EOF' > /etc/systemd/system/bigbang.service
-[Unit]
-Description=bigBangEnv Organism ({role})
-After=network.target
-
-[Service]
-Type=simple
-User=bigbang
-Group=bigbang
-EnvironmentFile=-/etc/bigbang/bigbang.conf
-WorkingDirectory=/var/lib/bigbang
-ExecStart=/opt/bigbang/venv/bin/python -m bigbang run --state ${{BIGBANG_STATE_DIR}} --issues ${{BIGBANG_ISSUES_DIR}} --commands ${{BIGBANG_COMMANDS_FILE}} --resume --forever --interval ${{BIGBANG_INTERVAL}} --brain ${{BIGBANG_BRAIN}}
-ExecStop=/opt/bigbang/venv/bin/python -m bigbang halt --state ${{BIGBANG_STATE_DIR}} --reason "systemd stop"
-Restart=on-failure
-RestartSec=3s
-
-[Install]
-WantedBy=multi-user.target
-EOF
+cp /opt/bigbang/repo/deploy/bigbang.conf /etc/bigbang/bigbang.conf
+cp /opt/bigbang/repo/deploy/bigbang-prestart.sh /usr/local/bin/bigbang-prestart.sh
+chmod +x /usr/local/bin/bigbang-prestart.sh
+cp /opt/bigbang/repo/deploy/bigbang-logrotate.conf /etc/logrotate.d/bigbang
+cp /opt/bigbang/repo/deploy/bigbang.service /etc/systemd/system/bigbang.service
 
 systemctl daemon-reload
 systemctl enable --now bigbang.service
@@ -226,6 +204,7 @@ def main() -> int:
     spawn.add_argument("tier_name", help="Name of the system tier (e.g. alpha, beta, triage)")
     spawn.add_argument("--subnet", default="10.99.1.1/24", help="Private CIDR for this tier's virtual bridge")
     spawn.add_argument("--members", default="sensor,reasoner,defense,motor", help="Comma-separated organism roles")
+    spawn.add_argument("--branch", default="main", help="Git branch of bigBangEnv to deploy")
 
     bridge = sub.add_parser("bridge", help="Connect Motor output of source to Sensor input of target")
     bridge.add_argument("source", help="Source container name (e.g. bb-alpha-motor)")
