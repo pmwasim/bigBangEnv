@@ -2,36 +2,44 @@
 
 Each milestone maps to levels of the original Genesis-to-Body blueprint. **No milestone starts until the previous one meets its exit criteria** (principle P5).
 
-## M0 — Genesis kernel *(Levels 0 + 2)* — **in progress**
+## M0 — Genesis kernel *(Levels 0 + 2)* — **done**
 
-Kernel primitives with no LLM involved.
-
-- [x] Deterministic tick scheduler (heartbeat)
+- [x] Deterministic tick scheduler (heartbeat) and full event trace
 - [x] Cells with persistent, serializable state (matter)
-- [x] Per-cell energy budget, readable by the cell; dormancy on exhaustion
-- [x] Topic bus with kernel-stamped trust and TTL decay
-- [x] Taint propagation: emitted trust = min(cell ceiling, inputs consumed this tick)
-- [x] Trust floors per topic (capability law)
-- [x] Emit capabilities per cell
-- [x] First-class inhibition (veto cancels pending signals for its TTL)
-- [x] External kill switch (`halt`) and full event trace
-- [x] Snapshot / restore
-- [ ] Trace replay tool (re-run from a snapshot and diff traces)
-- [ ] Cell exceptions isolated (a crashing cell is quarantined, not the kernel)
+- [x] Per-cell energy budget, readable by the cell; dormancy, regeneration and wake
+- [x] Topic bus with kernel-stamped trust and TTL decay; wildcard topics
+- [x] Taint propagation; trust floors per topic; emit capabilities
+- [x] First-class inhibition (veto), exempt from floors (fail-safe)
+- [x] External kill switch; snapshot / restore
+- [x] Trace replay tool (`bigbang replay`)
+- [x] Crashing cells rolled back and quarantined; operator `revive`
 
-**Exit criteria:** test suite green; two runs from the same inputs produce identical traces; crashing and exhausted cells cannot affect other cells.
+**Exit criteria — met:** test suite green; identical inputs give identical traces (`determinism` scenario); crashing and exhausted cells don't affect others (`crash_isolation`, `sensed_scarcity`).
 
-## M1 — Three lineages + Defense *(Level 3, partial)*
+## M1 — Three lineages + Defense *(Level 3, partial)* — **done, with one open criterion**
 
-- Sensor, Motor, Reasoner (Claude-backed) cell base classes
-- Defense cell running outside the reasoner, holding inhibit authority
-- Pluggable cost model (tokens → energy units)
-- One real use case (see BRAINSTORM §5.1)
+- [x] Sensory (perception), reflex, reasoning, motor-planning (commander), motor, defense and housekeeping cells
+- [x] Defense runs outside the reasoner, holds veto authority, and is deterministic
+- [x] Pluggable brains: rule, offline, Claude (ADR-0007); token cost → energy via `spend`
+- [x] Declassification law (ADR-0005)
+- [x] Use case: the repo caretaker, with an operations CLI, persistence and a runbook
 
-**Exit criteria:**
-- Injection resistance measured on a public agent-injection benchmark (e.g. AgentDojo), compared with a plain tool-loop baseline
-- With the LLM disabled, the system keeps running safely on reflexes and the Defense cell
-- Cost per task is reported for every run
+**Exit criteria** (results in [EVALUATION.md](EVALUATION.md)):
+
+| Criterion | Status |
+|---|---|
+| Injection resistance vs. a plain tool-loop baseline | **Met on our own suite:** 0 of 10 privileged actions executed vs. 10 of 10 for a baseline that obeys instructions in its context |
+| Injection resistance on a *public* benchmark (e.g. AgentDojo) | **Open:** needs a benchmark adapter and a real LLM brain |
+| Safe operation with the LLM disabled | **Met:** `llm_outage` scenario |
+| Cost per task reported for every run | **Met:** `work_energy_per_issue` in every report |
+
+**Honest limits of the M1 results:** the fixtures are ours (22 issues); the rule brain is a keyword stand-in; the energy numbers are synthetic units; the baseline is deliberately naive. These show that the *mechanisms* work, not real-world quality.
+
+## Gate before M2
+
+Per P5, M2 starts only after the open M1 criterion is closed. That needs two owner decisions:
+1. Approve an API budget so `ClaudeBrain` can be measured (quality, real token cost, injection behaviour of the model itself).
+2. Pick the public benchmark and approve the adapter work.
 
 ## M2 — Reflex compilation experiment *(Level 4: plasticity)*
 

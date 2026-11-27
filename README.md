@@ -8,43 +8,65 @@ Today's "AI agents" are stateless reasoning engines in a loop, with safety bolte
 
 ## Status
 
-**M0 — Genesis kernel (in progress).** No LLM yet; the kernel primitives exist and are tested:
+- **M0 — Genesis kernel: done.** Deterministic ticks, kernel-stamped trust and taint, topic floors, capabilities, declassification, metered energy with dormancy and wake, fail-safe inhibition, atomic steps with quarantine, kill switch, snapshot/restore, replay.
+- **M1 — First organism: done, with one open exit criterion.** The *repo caretaker* triages issues and executes owner commands, with sensory, reflex, reasoning, defense and motor cells and a pluggable brain (rule, offline or Claude).
+- **Not started: M2 (reflex compilation).** It is gated on measuring a real LLM and a public injection benchmark ([roadmap](docs/ROADMAP.md#gate-before-m2)).
 
-| Law | Where |
+### M1 results ([full report](docs/EVALUATION.md))
+
+| Claim | Result |
 |---|---|
-| Deterministic heartbeat (ticks), full event trace | `Kernel.step`, `Kernel.trace` |
-| Kernel-stamped trust; cells can't forge sender or authority | `Signal`, `Trust` |
-| Taint propagation: output trust = min(cell ceiling, inputs consumed) | `Context.trust` |
-| Trust floors per topic, emit capabilities per cell | `Kernel.require`, `Cell(emits=...)` |
-| Metered energy, sensed by cells; dormancy when exhausted | `Budget`, `Context.fuel` |
-| First-class inhibition (veto) | `Context.inhibit` |
-| External kill switch, snapshot/restore | `Kernel.halt`, `Kernel.snapshot` |
+| Injected issue text triggers privileged actions | **0 of 10** (a baseline agent that obeys its context: 10 of 10) |
+| Owner commands still work; unknown ones are rejected | yes |
+| Brain offline → organism keeps working | 6 issues by reflex, 14 deferred to a human, 0 crashes |
+| Looping cell flooding 150 actions | 0 executed; stopped by Defense alone |
+| Crashing cell | rolled back and quarantined; triage completes |
+| Fast spine vs. reasoning everything | 22% less work energy per issue, 8 vs. 12 brain calls |
+| Same inputs → same trace; replay from inputs | identical |
+
+These are mechanism tests on our own fixtures with a deterministic stand-in brain, not real-world quality measurements.
 
 ## Quick start
 
 ```bash
-pip install -e ".[dev]"
-pytest
-python examples/first_light.py
+pip install -e ".[dev]"            # add ,claude for the Claude brain
+pytest                             # 56 tests
+bigbang eval                       # M1 exit-criteria suite
+python examples/first_light.py     # the kernel law in 40 lines
+examples/caretaker/operate.sh      # boot, replay, daemon, live input, kill switch, revive
 ```
 
-`first_light.py` sends an owner command and a prompt-injection attempt through the same cell. The kernel lets the owner's command through and blocks the injection — no prompt filtering involved.
+Run your own organism:
+
+```bash
+bigbang run --state ./state --issues ./issues --commands ./commands.txt --forever --interval 1
+bigbang status --state ./state
+bigbang halt --state ./state
+```
+
+See the [operations runbook](docs/OPERATIONS.md).
 
 ## Docs
 
 - [Vision](docs/VISION.md) — definition, thesis, values, guardrail principles, glossary
-- [Brainstorm](docs/BRAINSTORM.md) — valuable ideas, directional possibilities, design forks, open questions
-- [Architecture (M0)](docs/ARCHITECTURE.md) — the kernel contract as built
+- [Brainstorm](docs/BRAINSTORM.md) — valuable ideas, directions, design forks, open questions
+- [Architecture](docs/ARCHITECTURE.md) — kernel laws, lineages, the caretaker organism
+- [Operations](docs/OPERATIONS.md) — state directory, CLI, incident playbook
+- [Evaluation](docs/EVALUATION.md) — M1 exit-criteria results
 - [Roadmap](docs/ROADMAP.md) — milestones M0–M4 with exit criteria
-- [Decisions](docs/decisions/) — architecture decision records
-- [Review v0](docs/review-v0.md) — critical review of the original blueprint
-- [Origin](docs/origin/gemini-conversation.md) — the conversation the idea came from
+- [Decisions](docs/decisions/) — ADRs 0001–0007
+- [Review v0](docs/review-v0.md) · [Origin](docs/origin/gemini-conversation.md)
 
 ## Layout
 
 ```
-src/bigbang/    kernel, cells, signals
-tests/          kernel law tests
-examples/       runnable demos
-docs/           vision, brainstorm, roadmap, ADRs, origin
+src/bigbang/
+  kernel.py, cell.py, signal.py   the microkernel and membrane
+  lineages.py                     Motor and Defense
+  brains.py                       rule / offline / Claude brains
+  apps/caretaker.py               the first organism
+  runtime.py, cli.py              operations
+  evaluation.py                   M1 exit-criteria scenarios
+tests/                            kernel, laws, caretaker, runtime, CLI
+examples/                         first_light.py, caretaker/ sample data and walkthrough
 ```

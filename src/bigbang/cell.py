@@ -14,8 +14,9 @@ if TYPE_CHECKING:
 class Cell:
     """An isolated, stateful actor stepped by the kernel once per tick.
 
-    Subclasses set ``lineage`` and ``subscriptions`` and implement ``step``.
-    ``memory`` is the cell's persistent matter: it must stay JSON-serializable.
+    Subclasses set ``lineage`` and ``subscriptions`` (exact topics, ``prefix.*``
+    or ``*``) and implement ``step``. ``memory`` is the cell's persistent
+    matter: it must stay JSON-serializable.
     """
 
     lineage: str = "generic"
@@ -28,12 +29,14 @@ class Cell:
         *,
         trust: Trust = Trust.OPERATOR,
         emits: Iterable[str] | None = None,
+        declassify: bool = False,
     ) -> None:
         if trust >= Trust.KERNEL:
             raise ValueError("cells cannot hold KERNEL trust")
         self.name = name
         self.trust = trust  # ceiling: emitted signals never exceed it
         self.emits = frozenset(emits) if emits is not None else None  # None = any topic
+        self.declassify = declassify  # operator grant; see ADR-0005
         self.memory: dict[str, Any] = {}
 
     def step(self, ctx: Context) -> None:  # pragma: no cover - abstract
@@ -66,5 +69,15 @@ class Context:
     def emit(self, topic: str, payload: Any = None, *, ttl: int = 3) -> Signal | None:
         return self._kernel._emit(self._cell, topic, payload, Kind.EXCITE, ttl, self.trust)
 
+    def emit_declassified(
+        self, topic: str, payload: dict[str, Any], schema: dict[str, Any], *, ttl: int = 3
+    ) -> Signal | None:
+        """Emit at the cell's own trust, if granted and the payload fits a closed schema."""
+        return self._kernel._declassify(self._cell, topic, payload, schema, ttl, self.trust)
+
     def inhibit(self, topic: str, *, ttl: int = 3, reason: str = "") -> Signal | None:
         return self._kernel._emit(self._cell, topic, reason, Kind.INHIBIT, ttl, self.trust)
+
+    def spend(self, units: float, reason: str = "") -> bool:
+        """Declare work (e.g. LLM tokens) against this cell's budget."""
+        return self._kernel._spend(self._cell, units, reason)
