@@ -47,6 +47,8 @@
 | Taint residue: a cell stays at or below the lowest trust it consumed in a committed step | `Context.__init__`, `_run_cell` | `taint`, `blocked` | `test_stored_world_input_keeps_its_taint_on_a_later_tick`, `test_taint_*` |
 | Receptors absorb excite input below a cell's `accepts` | `step` | `blocked` (`why=receptor`) | `test_owner_commands_still_work_after_world_input_on_the_command_topic` |
 | Atomic steps, quarantine, revive | `_run_cell`, `revive` | `quarantine`, `revive` | `test_crashing_cell_*`, `test_revive_*` |
+| Fail-closed guardians hold guarded topics when offline | `step`, `is_inhibited` | `hold` | `test_dormant_guardian_holds_actions_fail_closed` |
+| Bounded trace draining preserves cumulative stats | `drain_trace`, `snapshot` | — | `test_kernel_stats_and_drain_trace_preserve_report` |
 | TTL decay | `step` | `expire` | `test_signals_expire_after_ttl` |
 | External kill switch | `halt` | `halt` | `test_kill_switch_stops_the_kernel` |
 | `KERNEL` trust never held by cells or input | `Cell`, `inject` | `ValueError` | `test_cells_cannot_hold_kernel_trust` |

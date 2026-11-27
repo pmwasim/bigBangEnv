@@ -31,6 +31,7 @@ class Cell:
         emits: Iterable[str] | None = None,
         declassify: bool = False,
         accepts: Trust = Trust.WORLD,
+        guards: Iterable[str] = (),
     ) -> None:
         if trust >= Trust.KERNEL:
             raise ValueError("cells cannot hold KERNEL trust")
@@ -41,6 +42,8 @@ class Cell:
         # Receptor: excite signals below this trust are never delivered, so they
         # can't leave a taint residue in the cell (ADR-0010).
         self.accepts = accepts
+        # Fail-closed guardian: matching excite topics pause when this cell is offline (ADR-0011).
+        self.guards = tuple(guards)
         self.memory: dict[str, Any] = {}
 
     def step(self, ctx: Context) -> None:  # pragma: no cover - abstract

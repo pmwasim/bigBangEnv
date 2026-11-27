@@ -118,8 +118,10 @@ class Kernel:
         # A veto is final: once live, the kernel remembers it after the signal expires,
         # so a cell that slept through it still sees it (signal id -> veto topic).
         self.vetoed: dict[int, str] = {}
+        self.guardians: dict[str, tuple[str, ...]] = {}
         self.queue: list[Signal] = []
         self.trace: list[dict[str, Any]] = []
+        self.stats: dict[str, Any] = {"events": {}, "work_energy": 0.0}
         self.halted = False
         self._outbox: list[Signal] = []
         self._next_id = 1
@@ -131,6 +133,8 @@ class Kernel:
             raise ValueError(f"cell {cell.name!r} already exists")
         self.cells[cell.name] = cell
         self.budgets[cell.name] = Budget(fuel, regen=regen)
+        if cell.guards:
+            self.guardians[cell.name] = cell.guards
         self._log(
             "spawn", cell=cell.name, lineage=cell.lineage, trust=cell.trust.name,
             fuel=fuel, regen=regen, declassify=cell.declassify,
@@ -141,6 +145,26 @@ class Kernel:
         """Law: excite signals on ``topic`` need at least ``trust``."""
         self.topic_floor[topic] = trust
         self._log("law", topic=topic, min_trust=trust.name)
+
+    def guard(self, topic: str, cell_name: str) -> None:
+        """Law: excite signals on ``topic`` hold whenever ``cell_name`` is offline."""
+        if cell_name not in self.cells:
+            raise KeyError(f"unknown cell {cell_name!r}")
+        existing = self.guardians.get(cell_name, ())
+        if topic not in existing:
+            self.guardians[cell_name] = (*existing, topic)
+        self._log("law", topic=topic, guardian=cell_name)
+
+    def _guardian_pauses(self) -> list[str]:
+        """Topics held fail-closed while any guarding cell cannot step."""
+        return [
+            topic
+            for name, topics in self.guardians.items()
+            if name in self.dormant
+            or name in self.quarantined
+            or self.budgets[name].remaining < self.cells[name].step_cost
+            for topic in topics
+        ]
 
     # --------------------------------------------------- outside world
     def inject(
@@ -202,6 +226,7 @@ class Kernel:
                 live.append(signal)
 
         pauses = [s.topic for s in live if s.kind is Kind.INHIBIT and _veto_ids(s) is None]
+        pauses.extend(self._guardian_pauses())
         vetoes = [s for s in live if s.kind is Kind.INHIBIT and _veto_ids(s) is not None]
         for veto in vetoes:
             for signal_id in _veto_ids(veto) or ():
@@ -282,7 +307,9 @@ class Kernel:
             self.step()
 
     def is_inhibited(self, topic: str) -> bool:
-        """True while a live inhibition pauses ``topic``. Vetoes don't count: they name signals."""
+        """True while a live inhibition or offline guardian pauses ``topic``. Vetoes don't count: they name signals."""
+        if any(topic_matches(p, topic) for p in self._guardian_pauses()):
+            return True
         return any(
             s.kind is Kind.INHIBIT and _veto_ids(s) is None and topic_matches(s.topic, topic)
             and not s.expired(self.tick)
@@ -347,6 +374,18 @@ class Kernel:
     # ------------------------------------------------ matter & history
     def _log(self, event: str, **data: Any) -> None:
         self.trace.append({"tick": self.tick, "event": event, **data})
+        events = self.stats["events"]
+        events[event] = events.get(event, 0) + 1
+        if event == "emit":
+            self.stats["work_energy"] = round(self.stats["work_energy"] + self.EMIT_COST, 6)
+        elif event == "spend":
+            self.stats["work_energy"] = round(self.stats["work_energy"] + float(data["units"]), 6)
+
+    def drain_trace(self) -> list[dict[str, Any]]:
+        """Flush and clear the in-memory trace buffer while preserving cumulative stats."""
+        drained = self.trace
+        self.trace = []
+        return drained
 
     def snapshot(self) -> dict[str, Any]:
         return {
@@ -365,6 +404,10 @@ class Kernel:
                 for name, cell in self.cells.items()
             },
             "vetoed": {str(i): topic for i, topic in sorted(self.vetoed.items())},
+            "stats": {
+                "events": dict(self.stats["events"]),
+                "work_energy": self.stats["work_energy"],
+            },
         }
 
     def restore(self, snap: dict[str, Any]) -> None:
@@ -377,6 +420,12 @@ class Kernel:
         self.halted = snap["halted"]
         self.queue = [Signal.from_dict(s) for s in snap["queue"]]
         self.vetoed = {int(i): topic for i, topic in snap.get("vetoed", {}).items()}
+        saved_stats = snap.get("stats")
+        if saved_stats is not None:
+            self.stats = {
+                "events": dict(saved_stats.get("events", {})),
+                "work_energy": float(saved_stats.get("work_energy", 0.0)),
+            }
         self.dormant, self.quarantined, self.taint = set(), set(), {}
         for name, state in snap["cells"].items():
             self.cells[name].memory = json.loads(json.dumps(state["memory"]))

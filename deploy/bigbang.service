@@ -1,0 +1,68 @@
+[Unit]
+Description=bigBangEnv Autonomous Agent Organism Daemon
+Documentation=https://github.com/pmwasim/bigBangEnv
+After=network.target
+
+[Service]
+Type=simple
+User=bigbang
+Group=bigbang
+EnvironmentFile=-/etc/bigbang/bigbang.conf
+
+# Working and runtime directories
+WorkingDirectory=/var/lib/bigbang
+RuntimeDirectory=bigbang
+RuntimeDirectoryMode=0750
+StateDirectory=bigbang
+StateDirectoryMode=0750
+LogsDirectory=bigbang
+LogsDirectoryMode=0750
+
+# Pre-start safety and lock clearing
+ExecStartPre=/usr/local/bin/bigbang-prestart.sh
+
+# Execution
+ExecStart=/opt/bigbang/venv/bin/python -m bigbang run \
+  --state ${BIGBANG_STATE_DIR} \
+  --issues ${BIGBANG_ISSUES_DIR} \
+  --commands ${BIGBANG_COMMANDS_FILE} \
+  --resume \
+  --forever \
+  --interval ${BIGBANG_INTERVAL} \
+  --brain ${BIGBANG_BRAIN} \
+  ${BIGBANG_EXTRA_ARGS}
+
+# Orderly shutdown via kernel kill switch (allows current tick to complete and snapshot to write)
+ExecStop=/opt/bigbang/venv/bin/python -m bigbang halt --state ${BIGBANG_STATE_DIR} --reason "systemd stop"
+TimeoutStopSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+
+# Self-healing and restart policy
+Restart=on-failure
+RestartSec=5s
+RestartPreventExitStatus=2
+
+# Security & Sandboxing (Autonomous isolation)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=false
+LockPersonality=true
+
+# Explicit read/write storage boundaries
+ReadWritePaths=/var/lib/bigbang /var/log/bigbang
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bigbang
+
+[Install]
+WantedBy=multi-user.target

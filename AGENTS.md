@@ -88,3 +88,11 @@ Before you merge, rebase your growth branch on the latest `main` (or merge `main
 ## Handing off
 
 Sessions end and the next agent starts cold. Every PR description ends with a handoff note, and unfinished work follows [`AGENTS-HANDOFF.md`](AGENTS-HANDOFF.md).
+
+## Production Deployment & Proxmox Machine Isolation
+
+The owner mandates that `bigBangEnv` carry **autonomous, organic runs** in complete isolation:
+- **Strict Boundary**: `bigBangEnv` **SHALL NOT** touch, deploy to, or interact with **VM100** (`agentic-ai-node`), **VM200**, or any other existing virtual machines or workloads.
+- **Dedicated Node**: Production long-term runs are hosted on an isolated, dedicated Proxmox VE node (default ID `300`, hostname `bigbang-node`).
+- **Deployment Artifacts**: All deployment configurations, scripts, and service definitions live under [`deploy/`](deploy/) (see [`deploy/PROXMOX_DEPLOYMENT.md`](deploy/PROXMOX_DEPLOYMENT.md)).
+
