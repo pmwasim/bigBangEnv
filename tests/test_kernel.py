@@ -50,6 +50,25 @@ def test_injected_signal_is_delivered_next_tick_and_consumed():
     assert rec.memory["seen"] == [[1, "hello", "WORLD"]]
 
 
+def test_topic_floor_also_guards_outside_input():
+    # Regression (PR #1 review): inject() queued signals without checking floors,
+    # so WORLD input could land directly on a protected topic.
+    rec = Recorder("rec", topics=("out",))
+    k = big_bang(rec)
+    k.require("out", Trust.OPERATOR)
+    assert k.inject("out", "from-world", trust=Trust.WORLD) is None
+    k.inject("out", "from-operator", trust=Trust.OPERATOR, sender="operator")
+    k.run(3)
+    assert rec.memory["seen"] == [[1, "from-operator", "OPERATOR"]]
+    blocked = [e for e in k.trace if e["event"] == "blocked"]
+    assert blocked == [{
+        "tick": 0, "event": "blocked", "sender": "world",
+        "topic": "out", "trust": "WORLD", "needs": "OPERATOR",
+    }]
+    # A refused signal never enters history as input, so replay can't resurrect it.
+    assert [e["payload"] for e in k.trace if e["event"] == "inject"] == ["from-operator"]
+
+
 def test_emissions_become_visible_on_the_following_tick():
     relay, rec = Relay("relay"), Recorder("rec", topics=("out",))
     k = big_bang(relay, rec)

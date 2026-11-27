@@ -36,6 +36,7 @@
 | Signals are stamped by the kernel; cells can't construct them | `_make` | — | `test_kernel.py` |
 | Output trust = min(cell ceiling, inbox trust) | `Context.__init__` | — | `test_taint_propagates_from_world_input` |
 | Topic floors for excite signals | `_emit` | `blocked` | `test_topic_floor_blocks_low_trust_derivatives` |
+| Topic floors also guard outside input | `inject` | `blocked` | `test_topic_floor_also_guards_outside_input`, `test_world_cannot_inject_actions_past_the_motor_floor` |
 | Inhibit exempt from floors (fail-safe) | `_emit` | — | `test_inhibit_is_exempt_from_topic_floors` |
 | Emit capabilities (wildcards allowed) | `_emit` | `denied` | `test_emit_capabilities_are_enforced` |
 | Declassify: grant + closed schema only | `_declassify` | `denied` / `declassify` | `test_declassify_*` |
