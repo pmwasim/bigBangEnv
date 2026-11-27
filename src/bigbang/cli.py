@@ -18,7 +18,7 @@ def _print(data: Any) -> None:
 def cmd_run(args: argparse.Namespace) -> int:
     from .runtime import Runner
 
-    config: dict[str, Any] = {"brain": args.brain}
+    config: dict[str, Any] = {"brain": args.brain, "organism": args.organism, "role": args.role}
     options: dict[str, Any] = {}
     if args.brain == "claude" and args.model:
         options["model"] = args.model
@@ -123,6 +123,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--claude-max-calls", type=int, default=0,
                      help="hard cap on Claude calls for --brain cascade, persisted in the state dir")
     run.add_argument("--no-reflex", action="store_true", help="disable the fast spine")
+    run.add_argument("--organism", default="caretaker", choices=["caretaker", "body"],
+                     help="caretaker = M1 flat organism; body = 5-organ unified Body with hormones & M2 myelination")
+    run.add_argument("--role", default="general", help="role identity for the organism genome")
     run.add_argument("--ticks", type=int, default=50)
     run.add_argument("--forever", action="store_true", help="run until a HALT file appears")
     run.add_argument("--interval", type=float, default=0.0, help="seconds to sleep between ticks")

@@ -30,6 +30,8 @@ ExecStart=/opt/bigbang/venv/bin/python -m bigbang run \
   --forever \
   --interval ${BIGBANG_INTERVAL} \
   --brain ${BIGBANG_BRAIN} \
+  --organism ${BIGBANG_ORGANISM} \
+  --role ${BIGBANG_ROLE} \
   $BIGBANG_EXTRA_ARGS
 
 # Orderly shutdown via kernel kill switch (allows current tick to complete and snapshot to write)

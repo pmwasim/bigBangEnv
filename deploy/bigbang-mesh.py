@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bigbang-mesh: Multi-tier collective environment orchestrator for bigBangEnv on Incus."""
+"""bigbang-mesh: Multi-tier collective Body orchestrator for bigBangEnv on Incus."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -29,8 +30,8 @@ def cmd_list(args: argparse.Namespace) -> int:
         print("No active bigBangEnv organism environments found.")
         return 0
 
-    print(f"{'TIER':<15} {'ORGANISM':<24} {'STATE':<10} {'IPV4':<16} {'TICKS':<8} {'HALTED'}")
-    print("-" * 75)
+    print(f"{'TIER':<12} {'BODY':<22} {'STATE':<9} {'IPV4':<15} {'TICKS':<7} {'MODE':<11} {'CELLS':<6} {'HALTED'}")
+    print("-" * 92)
 
     for c in bb_containers:
         name = c["name"]
@@ -48,9 +49,7 @@ def cmd_list(args: argparse.Namespace) -> int:
                             ipv4 = addr.get("address", "-")
                             break
 
-        # Query organism kernel status if running
-        ticks = "-"
-        halted = "-"
+        ticks = mode = cells = halted = "-"
         if state == "Running":
             try:
                 res = run_cmd([
@@ -59,12 +58,13 @@ def cmd_list(args: argparse.Namespace) -> int:
                 ])
                 stat = json.loads(res)
                 ticks = str(stat.get("tick", 0))
+                mode = str(stat.get("operating_mode", "CARE"))
+                cells = str(len(stat.get("cells", {})))
                 halted = str(stat.get("halted", False))
             except Exception:
-                ticks = "init"
-                halted = "init"
+                ticks = mode = cells = halted = "init"
 
-        print(f"{tier:<15} {role:<24} {state:<10} {ipv4:<16} {ticks:<8} {halted}")
+        print(f"{tier:<12} {role:<22} {state:<9} {ipv4:<15} {ticks:<7} {mode:<11} {cells:<6} {halted}")
 
     return 0
 
@@ -76,7 +76,6 @@ def cmd_spawn_tier(args: argparse.Namespace) -> int:
 
     print(f"[*] Spawning Tier '{tier}' (Subnet: {subnet})...")
 
-    # 1. Ensure dedicated synaptic bridge network
     try:
         run_cmd(["incus", "network", "show", net_name])
     except subprocess.CalledProcessError:
@@ -86,13 +85,11 @@ def cmd_spawn_tier(args: argparse.Namespace) -> int:
             f"ipv4.address={subnet}", "ipv4.nat=true", "ipv6.address=none"
         ])
 
-    # 2. Spawn member organisms
     members = [m.strip() for m in args.members.split(",") if m.strip()]
     for role in members:
         c_name = f"bb-{tier}-{role}"
-        print(f"[+] Provisioning organism environment: {c_name} (Role: {role})...")
+        print(f"[+] Provisioning 5-organ Body environment: {c_name} (Role: {role})...")
 
-        # Check if already exists
         exists = any(c["name"] == c_name for c in get_incus_containers())
         if not exists:
             run_cmd([
@@ -103,8 +100,7 @@ def cmd_spawn_tier(args: argparse.Namespace) -> int:
             print(f"[+] Waiting for network on {c_name}...")
             run_cmd(["sleep", "3"])
 
-            # Install bigBangEnv inside container
-            print(f"[+] Bootstrapping bigBangEnv kernel inside {c_name}...")
+            print(f"[+] Bootstrapping 5-organ Body kernel inside {c_name}...")
             branch = getattr(args, "branch", "main")
             setup_script = f"""
 set -euo pipefail
@@ -122,6 +118,7 @@ python3 -m venv /opt/bigbang/venv
 /opt/bigbang/venv/bin/pip install -q -e "/opt/bigbang/repo[dev]"
 
 cp /opt/bigbang/repo/deploy/bigbang.conf /etc/bigbang/bigbang.conf
+sed -i 's/^BIGBANG_ROLE=.*/BIGBANG_ROLE={role}/' /etc/bigbang/bigbang.conf
 cp /opt/bigbang/repo/deploy/bigbang-prestart.sh /usr/local/bin/bigbang-prestart.sh
 chmod +x /usr/local/bin/bigbang-prestart.sh
 cp /opt/bigbang/repo/deploy/bigbang-logrotate.conf /etc/logrotate.d/bigbang
@@ -131,37 +128,66 @@ systemctl daemon-reload
 systemctl enable --now bigbang.service
 """
             run_cmd(["incus", "exec", c_name, "--", "bash", "-c", setup_script])
-            print(f"[✓] {c_name} is active and ticking.")
+            print(f"[✓] {c_name} (Body role={role}) is active and ticking.")
         else:
             print(f"[i] {c_name} already exists. Skipping.")
 
-    print(f"\n[✓] Tier '{tier}' fully instantiated across {len(members)} collective environments.")
+    print(f"\n[✓] Tier '{tier}' instantiated across {len(members)} living Body environments.")
     return 0
+
+
+def cmd_relay_loop(args: argparse.Namespace) -> int:
+    """Continuous synaptic relay forwarding verified Motor outcomes from source -> target."""
+    source_c, target_c = args.source, args.target
+    cursor_file = Path(f"/tmp/bigbang_relay_{source_c}_to_{target_c}.cursor")
+    cursor = int(cursor_file.read_text()) if cursor_file.exists() else 0
+
+    print(f"[*] Synaptic relay live: {source_c} (cursor={cursor}) -> {target_c}")
+    while True:
+        try:
+            raw = run_cmd([
+                "incus", "exec", source_c, "--",
+                "cat", "/var/lib/bigbang/state/ledger.json"
+            ], check=False)
+            if raw:
+                data = json.loads(raw)
+                history = data.get("history", [])
+                while cursor < len(history):
+                    entry = history[cursor]
+                    cursor += 1
+                    cursor_file.write_text(str(cursor))
+                    # Forward non-trivial actions into target Body's sensory ingress
+                    relay_id = 100_000 + cursor
+                    label = entry.get("label", entry.get("verb", "event"))
+                    payload = {
+                        "id": relay_id,
+                        "title": f"[{label}] peer relay from {source_c} (issue #{entry.get('issue')})",
+                        "body": f"Verified {entry.get('verb')} from {source_c}: {json.dumps(entry)}",
+                    }
+                    fname = f"synapse_{source_c}_{relay_id:06d}.json"
+                    encoded = json.dumps(payload).replace("'", "'\\''")
+                    run_cmd([
+                        "incus", "exec", target_c, "--", "bash", "-c",
+                        f"echo '{encoded}' > /var/lib/bigbang/issues/{fname} && chown bigbang:bigbang /var/lib/bigbang/issues/{fname}"
+                    ])
+                    print(f"[→] Relayed event #{cursor} ({label}) from {source_c} -> {target_c}")
+        except Exception as exc:
+            print(f"[!] Relay cycle warning: {exc}", file=sys.stderr)
+        time.sleep(args.interval)
 
 
 def cmd_bridge(args: argparse.Namespace) -> int:
     source_c, target_c = args.source, args.target
-    link_name = f"{source_c}_to_{target_c}"
-    synapse_dir = Path("/var/lib/bigbang-mesh/synapses") / link_name
-    synapse_dir.mkdir(parents=True, exist_ok=True)
-
-    print(f"[*] Establishing Synaptic Bridge: {source_c} -> {target_c}...")
-    try:
-        # Unprivileged Incus containers require shift=true for shared host mounts.
-        # Mount source outbox and target inbox separately to avoid colliding on issues/.
-        run_cmd([
-            "incus", "config", "device", "add", source_c, f"outbox_{target_c}",
-            "disk", f"source={synapse_dir}", f"path=/var/lib/bigbang/outbox/{target_c}", "shift=true"
-        ])
-        run_cmd([
-            "incus", "config", "device", "add", target_c, f"synapse_{source_c}",
-            "disk", f"source={synapse_dir}", "path=/var/lib/bigbang/issues", "shift=true"
-        ])
-        print(f"[✓] Synaptic bridge active ({synapse_dir}, shift=true).")
-        print(f"    Note: {source_c} writes JSON impulses to /var/lib/bigbang/outbox/{target_c}/")
-        print(f"    which appear directly in {target_c}'s /var/lib/bigbang/issues/ at WORLD trust.")
-    except Exception as e:
-        print(f"Notice or error: {e}")
+    unit_name = f"bigbang-synapse-{source_c}-to-{target_c}"
+    print(f"[*] Starting persistent Synaptic Conduit service: {unit_name} ({source_c} -> {target_c})...")
+    run_cmd(["sudo", "systemctl", "stop", unit_name], check=False)
+    run_cmd([
+        "sudo", "systemd-run", "--unit", unit_name,
+        "--description", f"bigBangEnv Synaptic Conduit {source_c} -> {target_c}",
+        sys.executable, str(Path(__file__).resolve()),
+        "relay-loop", source_c, target_c, "--interval", "2.0"
+    ])
+    print(f"[✓] Synaptic Conduit active! Motor outcomes from {source_c} now flow directly into {target_c}.")
     return 0
 
 
@@ -195,26 +221,31 @@ def cmd_trace(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="bigbang-mesh: Multi-tier collective environment manager")
+    parser = argparse.ArgumentParser(description="bigbang-mesh: Multi-tier collective Body manager")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("list", help="List all active organism tiers and environments")
+    sub.add_parser("list", help="List all active Body tiers and organisms")
 
-    spawn = sub.add_parser("spawn-tier", help="Spawn an isolated tier of organism environments")
-    spawn.add_argument("tier_name", help="Name of the system tier (e.g. alpha, beta, triage)")
+    spawn = sub.add_parser("spawn-tier", help="Spawn an isolated tier of 5-organ Body environments")
+    spawn.add_argument("tier_name", help="Name of the system tier (e.g. alpha, beta)")
     spawn.add_argument("--subnet", default="10.99.1.1/24", help="Private CIDR for this tier's virtual bridge")
-    spawn.add_argument("--members", default="sensor,reasoner,defense,motor", help="Comma-separated organism roles")
+    spawn.add_argument("--members", default="sentinel,triage,auditor,executor", help="Comma-separated Body roles")
     spawn.add_argument("--branch", default="main", help="Git branch of bigBangEnv to deploy")
 
-    bridge = sub.add_parser("bridge", help="Connect Motor output of source to Sensor input of target")
-    bridge.add_argument("source", help="Source container name (e.g. bb-alpha-motor)")
-    bridge.add_argument("target", help="Target container name (e.g. bb-beta-sensor)")
+    bridge = sub.add_parser("bridge", help="Establish a live Synaptic Conduit from source Body to target Body")
+    bridge.add_argument("source", help="Source container name (e.g. bb-alpha-sentinel)")
+    bridge.add_argument("target", help="Target container name (e.g. bb-alpha-triage)")
 
-    halt = sub.add_parser("halt-tier", help="Halt all organisms in a tier")
+    relay = sub.add_parser("relay-loop", help="Internal foreground synaptic relay loop")
+    relay.add_argument("source")
+    relay.add_argument("target")
+    relay.add_argument("--interval", type=float, default=2.0)
+
+    halt = sub.add_parser("halt-tier", help="Halt all Bodies in a tier")
     halt.add_argument("tier_name", help="Name of the tier to halt")
 
-    trace = sub.add_parser("trace", help="View live trace of an organism")
-    trace.add_argument("container", help="Container name (e.g. bb-alpha-reasoner)")
+    trace = sub.add_parser("trace", help="View live trace of a Body")
+    trace.add_argument("container", help="Container name (e.g. bb-alpha-sentinel)")
     trace.add_argument("--tail", type=int, default=15, help="Number of records to show")
 
     args = parser.parse_args()
@@ -224,6 +255,8 @@ def main() -> int:
         return cmd_spawn_tier(args)
     elif args.command == "bridge":
         return cmd_bridge(args)
+    elif args.command == "relay-loop":
+        return cmd_relay_loop(args)
     elif args.command == "halt-tier":
         return cmd_halt_tier(args)
     elif args.command == "trace":

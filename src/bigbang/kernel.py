@@ -119,6 +119,12 @@ class Kernel:
         # so a cell that slept through it still sees it (signal id -> veto topic).
         self.vetoed: dict[int, str] = {}
         self.guardians: dict[str, tuple[str, ...]] = {}
+        self.gradients: dict[str, dict[str, float]] = {}
+        self.hormones: dict[str, float] = {"fuel": 1.0, "stress": 0.0, "urgency": 0.0, "idle": 0.0}
+        self.operating_mode: str = "ALERT"
+        self._cooldowns: dict[str, int] = {}
+        self._tick_activity: bool = False
+        self._tick_stress: float = 0.0
         self.queue: list[Signal] = []
         self.trace: list[dict[str, Any]] = []
         self.stats: dict[str, Any] = {"events": {}, "work_energy": 0.0}
@@ -183,12 +189,16 @@ class Kernel:
         """
         if trust >= Trust.KERNEL:
             raise ValueError("outside input cannot claim KERNEL trust")
+        if topic.startswith("_organ."):
+            self._log("blocked", sender=sender, topic=topic, trust=trust.name, needs="INTERNAL_ORGAN")
+            return None
         floor = self.topic_floor.get(topic)
         if floor is not None and trust < floor:
             self._log("blocked", sender=sender, topic=topic, trust=trust.name, needs=floor.name)
             return None
         signal = self._make(topic, payload, Kind.EXCITE, sender, trust, ttl)
         self.queue.append(signal)
+        self._tick_activity = True
         self._log("inject", **signal.to_dict())
         return signal
 
@@ -217,6 +227,16 @@ class Kernel:
             if name in self.dormant and budget.remaining >= cell.step_cost:
                 self.dormant.discard(name)
                 self._log("wake", cell=name)
+            if self._cooldowns.get(name, 0) > 0:
+                self._cooldowns[name] -= 1
+
+        # Paracrine gradient decay (0.8x per tick; prune negligible residue)
+        for comp in list(self.gradients):
+            decayed = {k: round(v * 0.8, 4) for k, v in self.gradients[comp].items() if abs(v * 0.8) >= 0.01}
+            if decayed:
+                self.gradients[comp] = decayed
+            else:
+                del self.gradients[comp]
 
         live: list[Signal] = []
         for signal in self.queue:
@@ -256,9 +276,15 @@ class Kernel:
                 self.dormant.add(name)
                 self._log("dormant", cell=name)
                 continue
+            if self._cooldowns.get(name, 0) > 0:
+                # Refractory cooldown: cell steps with empty inbox and leaves signals for peers
+                self._run_cell(cell, [])
+                continue
             matching = [
                 s for s in pending
-                if s.kind is Kind.EXCITE and any(topic_matches(p, s.topic) for p in cell.subscriptions)
+                if s.kind is Kind.EXCITE
+                and any(topic_matches(p, s.topic) for p in cell.subscriptions)
+                and self._can_deliver_to_cell(cell, s.topic)
             ]
             inbox = [s for s in matching if s.trust >= cell.accepts]
             for s in matching:
@@ -266,7 +292,10 @@ class Kernel:
                     self._log("blocked", cell=cell.name, topic=s.topic, trust=s.trust.name,
                               needs=cell.accepts.name, why="receptor")
             delivered.update(s.id for s in matching)
+            emitted_before = len(self._outbox)
             self._run_cell(cell, inbox)
+            if cell.cooldown > 0 and len(self._outbox) > emitted_before:
+                self._cooldowns[name] = cell.cooldown
 
         # Delivered excite signals are consumed; inhibit and paused signals
         # persist until they expire or lift. New emissions become visible next tick.
@@ -274,6 +303,7 @@ class Kernel:
             s for s in pending if s.kind is Kind.INHIBIT or s.id not in delivered
         ] + held + self._outbox
         self._outbox = []
+        self._update_hormones()
 
     def _run_cell(self, cell: Cell, inbox: list[Signal]) -> None:
         """Step one cell atomically: on exception, roll back its matter and emissions."""
@@ -327,9 +357,68 @@ class Kernel:
         )
 
     # -------------------------------------------------------- membrane
+    @staticmethod
+    def _can_deliver_to_cell(cell: Cell, topic: str) -> bool:
+        if not topic.startswith("_organ."):
+            return True
+        if cell.organ is None:
+            return False
+        return topic.startswith(f"_organ.{cell.organ}.")
+
+    def _emit_gradient(self, cell: Cell, name: str, delta: float) -> float:
+        compartment = cell.organ or "body"
+        bucket = self.gradients.setdefault(compartment, {})
+        updated = round(max(0.0, min(10.0, bucket.get(name, 0.0) + float(delta))), 4)
+        bucket[name] = updated
+        return updated
+
+    def _update_hormones(self) -> None:
+        total_cap = sum(b.capacity for b in self.budgets.values())
+        total_rem = sum(b.remaining for b in self.budgets.values())
+        fuel = round(total_rem / total_cap, 4) if total_cap > 0 else 1.0
+
+        friction = sum(
+            val
+            for bucket in self.gradients.values()
+            for gname, val in bucket.items()
+            if gname in ("friction", "stress", "error")
+        )
+        raw_stress = min(1.0, self._tick_stress * 0.25 + friction * 0.2)
+        stress = round(max(0.0, min(1.0, 0.85 * self.hormones["stress"] + 0.15 * raw_stress)), 4)
+
+        raw_urgency = min(1.0, len(self.queue) / 20.0)
+        urgency = round(max(0.0, min(1.0, 0.7 * self.hormones["urgency"] + 0.3 * raw_urgency)), 4)
+
+        idle = 0.0 if (self._tick_activity or len(self.queue) > 0) else round(self.hormones["idle"] + 1.0, 1)
+
+        self.hormones = {"fuel": fuel, "stress": stress, "urgency": urgency, "idle": idle}
+        self._tick_activity = False
+        self._tick_stress = 0.0
+
+        # Schmitt-trigger hysteresis for operating posture (prevents oscillation)
+        prev = self.operating_mode
+        mode = prev
+        if fuel <= 0.05 or (prev == "DORMANT" and fuel < 0.15):
+            mode = "DORMANT"
+        elif stress >= 0.6 or (prev == "LOCKDOWN" and stress > 0.35):
+            mode = "LOCKDOWN"
+        elif idle >= 10.0 and urgency <= 0.1:
+            mode = "SLEEP_REM"
+        elif urgency >= 0.6 or (prev == "DEEP_FOCUS" and urgency > 0.35):
+            mode = "DEEP_FOCUS"
+        else:
+            mode = "ALERT"
+
+        if mode != prev:
+            self.operating_mode = mode
+            self._log("mode", from_mode=prev, to_mode=mode, fuel=fuel, stress=stress, urgency=urgency, idle=idle)
+
     def _emit(
         self, cell: Cell, topic: str, payload: Any, kind: Kind, ttl: int, trust: Trust
     ) -> Signal | None:
+        if topic.startswith("_organ.") and (cell.organ is None or not topic.startswith(f"_organ.{cell.organ}.")):
+            self._log("denied", cell=cell.name, topic=topic, why="organ compartment")
+            return None
         if cell.emits is not None and not any(topic_matches(p, topic) for p in cell.emits):
             self._log("denied", cell=cell.name, topic=topic, why="no capability")
             return None
@@ -342,6 +431,8 @@ class Kernel:
             return None
         signal = self._make(topic, payload, kind, cell.name, trust, ttl)
         self._outbox.append(signal)
+        if not topic.startswith("_organ."):
+            self._tick_activity = True
         self._log("emit", **signal.to_dict())
         return signal
 
@@ -380,6 +471,8 @@ class Kernel:
             self.stats["work_energy"] = round(self.stats["work_energy"] + self.EMIT_COST, 6)
         elif event == "spend":
             self.stats["work_energy"] = round(self.stats["work_energy"] + float(data["units"]), 6)
+        elif event in ("blocked", "denied", "quarantine", "cancel", "hold"):
+            self._tick_stress += 1.0
 
     def drain_trace(self) -> list[dict[str, Any]]:
         """Flush and clear the in-memory trace buffer while preserving cumulative stats."""
@@ -408,6 +501,10 @@ class Kernel:
                 "events": dict(self.stats["events"]),
                 "work_energy": self.stats["work_energy"],
             },
+            "gradients": {k: dict(v) for k, v in sorted(self.gradients.items())},
+            "hormones": dict(self.hormones),
+            "operating_mode": self.operating_mode,
+            "cooldowns": dict(self._cooldowns),
         }
 
     def restore(self, snap: dict[str, Any]) -> None:
@@ -426,6 +523,11 @@ class Kernel:
                 "events": dict(saved_stats.get("events", {})),
                 "work_energy": float(saved_stats.get("work_energy", 0.0)),
             }
+        self.gradients = {k: dict(v) for k, v in snap.get("gradients", {}).items()}
+        if "hormones" in snap:
+            self.hormones = {k: float(v) for k, v in snap["hormones"].items()}
+        self.operating_mode = snap.get("operating_mode", "ALERT")
+        self._cooldowns = {k: int(v) for k, v in snap.get("cooldowns", {}).items()}
         self.dormant, self.quarantined, self.taint = set(), set(), {}
         for name, state in snap["cells"].items():
             self.cells[name].memory = json.loads(json.dumps(state["memory"]))

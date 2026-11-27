@@ -32,6 +32,8 @@ class Cell:
         declassify: bool = False,
         accepts: Trust = Trust.WORLD,
         guards: Iterable[str] = (),
+        organ: str | None = None,
+        cooldown: int = 0,
     ) -> None:
         if trust >= Trust.KERNEL:
             raise ValueError("cells cannot hold KERNEL trust")
@@ -44,6 +46,9 @@ class Cell:
         self.accepts = accepts
         # Fail-closed guardian: matching excite topics pause when this cell is offline (ADR-0011).
         self.guards = tuple(guards)
+        # Organ compartment membership and refractory cooldown (ADR-0012).
+        self.organ = organ
+        self.cooldown = max(0, int(cooldown))
         self.memory: dict[str, Any] = {}
 
     def step(self, ctx: Context) -> None:  # pragma: no cover - abstract
@@ -71,6 +76,25 @@ class Context:
     def fuel(self) -> float:
         """Remaining energy for this cell (sensed scarcity)."""
         return self._kernel.budgets[self._cell.name].remaining
+
+    @property
+    def hormones(self) -> dict[str, float]:
+        """Global endocrine scalar fields (read-only snapshot)."""
+        return dict(self._kernel.hormones)
+
+    @property
+    def mode(self) -> str:
+        """Current whole-body operating posture."""
+        return self._kernel.operating_mode
+
+    def gradient(self, name: str) -> float:
+        """Read local paracrine gradient intensity in this cell's organ compartment."""
+        compartment = self._cell.organ or "body"
+        return self._kernel.gradients.get(compartment, {}).get(name, 0.0)
+
+    def emit_gradient(self, name: str, delta: float) -> float:
+        """Emit a paracrine gradient delta into this cell's organ compartment."""
+        return self._kernel._emit_gradient(self._cell, name, delta)
 
     def is_inhibited(self, topic: str) -> bool:
         """True while ``topic`` is paused by an inhibition."""
