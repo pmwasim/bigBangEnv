@@ -12,9 +12,10 @@ set -euo pipefail
 
 INCUBATOR_ID="${INCUBATOR_ID:-300}"
 INCUBATOR_NAME="${INCUBATOR_NAME:-bigbang-incubator}"
-CORES="${CORES:-4}"
-RAM_MB="${RAM_MB:-8192}"          # 8 GB for high-density container incubation
-DISK_GB="${DISK_GB:-64}"
+CORES="${CORES:-2}"
+RAM_MB="${RAM_MB:-2048}"          # Safe default for 32GB host alongside VM100 (24GB) + VM200 (1GB)
+MIN_HOST_HEADROOM_MB="${MIN_HOST_HEADROOM_MB:-1536}"
+DISK_GB="${DISK_GB:-32}"
 STORAGE="${STORAGE:-local-lvm}"   # local-lvm or local-zfs
 CLOUD_STORAGE="${CLOUD_STORAGE:-local}"
 BRIDGE="${BRIDGE:-vmbr0}"
@@ -37,6 +38,15 @@ if qm status "$INCUBATOR_ID" >/dev/null 2>&1 || pct status "$INCUBATOR_ID" >/dev
   echo "ERROR: ID $INCUBATOR_ID already exists on this Proxmox cluster. Choose another ID (e.g. 310)." >&2
   exit 1
 fi
+
+# 1b. Host RAM Headroom Guard (protects VM100 / VM200 from OOM)
+AVAIL_MB=$(free -m | awk '/^Mem:/ {print $7}')
+if (( AVAIL_MB - RAM_MB < MIN_HOST_HEADROOM_MB )); then
+  echo "ERROR: Insufficient host RAM headroom! Available=${AVAIL_MB}MB, Requested=${RAM_MB}MB, Required headroom=${MIN_HOST_HEADROOM_MB}MB." >&2
+  echo "Lower RAM_MB (e.g. RAM_MB=2048) to keep VM100 and VM200 safe." >&2
+  exit 1
+fi
+echo "[✓] Host RAM check passed: ${AVAIL_MB}MB available; allocating ${RAM_MB}MB leaves $((AVAIL_MB - RAM_MB))MB headroom."
 
 # 2. Verify Host Nested KVM Virtualization
 echo "[+] Checking host nested virtualization..."
