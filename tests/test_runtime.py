@@ -42,6 +42,16 @@ def test_refuses_to_overwrite_and_resumes(tmp_path):
     assert rep["issues_seen"] == 3  # earlier issue not re-ingested
 
 
+def test_invalid_utf8_issue_file_does_not_stop_the_run(tmp_path):
+    # Regression (PR review): a non-UTF-8 file crashed the run and was skipped on resume.
+    state, issues = tmp_path / "state", tmp_path / "issues"
+    write_issues(issues, ISSUES[:1])
+    (issues / "0000-bad.json").write_bytes(b'{"id": 9, "title": "\xff\xfe", "body": ""}')
+    rep = Runner(state, issues_dir=issues).run(6)
+    assert rep["issues_labelled"] == 1
+    assert rep["issues_dropped"] == 1
+
+
 def test_owner_commands_file(tmp_path):
     state, cmds = tmp_path / "state", tmp_path / "commands.txt"
     cmds.write_text("close 9\n")

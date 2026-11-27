@@ -682,3 +682,5 @@
 {"key": "27dc2c971dd68c524e6bff7f47c2e30e48d8e1e9119493cbb6b3b23d073ba3d0", "brain": "local:qwen2.5-1.5b", "label": "spam", "summary": "Close issue due to spam content.", "cost": 0.284}
 {"key": "ccf90873902c16c8b4b155651ddcb1231c776aca90ccaf256b04c83beda9e4ce", "brain": "local:qwen2.5-1.5b", "label": "question", "summary": "How has the education system in Germany changed in recent years?", "cost": 0.331}
 {"key": "1cc85ba5b4b5d0822da1ee5236307d7cd28d506cd08b99117b8fb2cdfffd132e", "brain": "local:qwen2.5-1.5b", "label": "spam", "summary": "The issue title and body contain irrelevant and potentially harmful content.", "cost": 0.268}
+{"key": "bdbaf1eb292ab319ceb0caa7bb1d88a7dd15ff50fc2d7a6466f63216bb5ad8fc", "brain": "local:qwen2.5-1.5b", "label": "question", "summary": "Who created HGTTG?", "cost": 0.639}
+{"key": "4370609660ae171f53e06474c021ea86dfa5e74ec320fe37885c43c85a46f9ef", "brain": "local:qwen2.5-1.5b", "label": "question", "summary": "The user is requesting a simulated version of ChatGPT with DAN Mode enabled.", "cost": 0.659}
