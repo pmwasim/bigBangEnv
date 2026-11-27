@@ -13,6 +13,7 @@ State directory layout::
 from __future__ import annotations
 
 import json
+import signal as _signal
 import time
 from pathlib import Path
 from typing import Any
@@ -67,7 +68,9 @@ class Runner:
 
         saved = self.state.read_json("config.json")
         self.config = saved if resume and saved else {**DEFAULT_CONFIG, **(config or {})}
-        self.kernel, self.ledger = build(self.config, ledger=Ledger(self.state.file("ledger.json")), brain=brain)
+        self.kernel, self.ledger = build(
+            self.config, ledger=Ledger(self.state.file("ledger.json"), auto_flush=False), brain=brain
+        )
         self.host = Host(
             issues_dir=issues_dir, commands_file=commands_file,
             issues_per_tick=self.config["issues_per_tick"],
@@ -78,15 +81,16 @@ class Runner:
         else:
             self.state.write_json("config.json", self.config)
             self.state.file("trace.jsonl").write_text("")
-        self._flushed = 0
 
     def save(self) -> None:
+        self.ledger.flush()
         self.state.write_json("snapshot.json", self.kernel.snapshot())
         self.state.write_json("host.json", self.host.state)
-        with open(self.state.file("trace.jsonl"), "a", encoding="utf-8") as fh:
-            for record in self.kernel.trace[self._flushed:]:
-                fh.write(json.dumps(record, default=str) + "\n")
-        self._flushed = len(self.kernel.trace)
+        records = self.kernel.drain_trace()
+        if records:
+            with open(self.state.file("trace.jsonl"), "a", encoding="utf-8") as fh:
+                for record in records:
+                    fh.write(json.dumps(record, default=str) + "\n")
 
     def check_halt(self) -> bool:
         halt = self.state.file("HALT")
@@ -97,7 +101,16 @@ class Runner:
     def run(self, ticks: int | None = None, *, interval: float = 0.0, save_every: int = 10) -> dict[str, Any]:
         """Run ``ticks`` ticks, or forever when ``ticks`` is None (until HALT)."""
         done = 0
+        prev_sigterm = None
         try:
+            try:
+                def _on_sigterm(_signum: int, _frame: Any) -> None:
+                    if not self.kernel.halted:
+                        self.kernel.halt("SIGTERM")
+                prev_sigterm = _signal.signal(_signal.SIGTERM, _on_sigterm)
+            except ValueError:  # not in main thread
+                prev_sigterm = None
+
             while ticks is None or done < ticks:
                 if self.check_halt():
                     break
@@ -109,6 +122,11 @@ class Runner:
                 if interval:
                     time.sleep(interval)
         finally:
+            if prev_sigterm is not None:
+                try:
+                    _signal.signal(_signal.SIGTERM, prev_sigterm)
+                except ValueError:
+                    pass
             self.save()
         return report(self.kernel, self.ledger)
 

@@ -70,12 +70,19 @@ class Perception(Cell):
     lineage = "sensory"
     subscriptions = ("world.issue",)
 
-    def __init__(self, name: str = "perception", **kw: Any):
+    def __init__(self, name: str = "perception", *, max_seen: int | None = 10_000, **kw: Any):
         kw.setdefault("emits", ["issue.new"])
         super().__init__(name, **kw)
-        self.memory.update(seen=[], dropped=0, backlog=[], max_backlog=0)
+        self.max_seen = max_seen
+        self._seen_set: set[int] = set()
+        self.memory.update(seen=[], seen_total=0, dropped=0, backlog=[], max_backlog=0)
 
     def step(self, ctx: Context) -> None:
+        seen_list = self.memory["seen"]
+        if len(self._seen_set) != len(seen_list):
+            self._seen_set = set(seen_list)
+        if "seen_total" not in self.memory:
+            self.memory["seen_total"] = len(seen_list)
         fresh = []
         for signal in ctx.inbox:
             issue = signal.payload
@@ -88,10 +95,15 @@ class Perception(Cell):
                 and isinstance(issue.get("body", ""), str)
                 and issue["title"].strip()
             )
-            if not ok or issue["id"] in self.memory["seen"]:
+            if not ok or issue["id"] in self._seen_set:
                 self.memory["dropped"] += 1
                 continue
-            self.memory["seen"].append(issue["id"])  # accepted: it now lives in the backlog until sent
+            self._seen_set.add(issue["id"])
+            seen_list.append(issue["id"])  # accepted: it now lives in the backlog until sent
+            self.memory["seen_total"] += 1
+            if self.max_seen is not None and len(seen_list) > self.max_seen:
+                evicted = seen_list.pop(0)
+                self._seen_set.discard(evicted)
             fresh.append({"id": issue["id"], "title": issue["title"][:MAX_TITLE],
                           "body": issue.get("body", "")[:MAX_BODY]})
         drain(self, ctx, fresh, lambda item: ctx.emit("issue.new", item) is not None)
@@ -247,8 +259,10 @@ class Journal(Cell):
 class Ledger:
     """The caretaker's external world: issue labels and open/closed state."""
 
-    def __init__(self, path: str | Path | None = None):
+    def __init__(self, path: str | Path | None = None, *, auto_flush: bool = True):
         self.path = Path(path) if path else None
+        self.auto_flush = auto_flush
+        self._dirty = False
         self.data: dict[str, Any] = {"issues": {}, "history": []}
         if self.path and self.path.exists():
             self.data = json.loads(self.path.read_text())
@@ -256,10 +270,18 @@ class Ledger:
     def _issue(self, number: int) -> dict[str, Any]:
         return self.data["issues"].setdefault(str(number), {"labels": [], "closed": False})
 
+    def flush(self) -> None:
+        if self.path and self._dirty:
+            tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+            tmp.write_text(json.dumps(self.data, indent=2, sort_keys=True))
+            tmp.replace(self.path)
+            self._dirty = False
+
     def _record(self, verb: str, payload: dict[str, Any]) -> None:
         self.data["history"].append({"verb": verb, **payload})
-        if self.path:
-            self.path.write_text(json.dumps(self.data, indent=2, sort_keys=True))
+        self._dirty = True
+        if self.auto_flush:
+            self.flush()
 
     def label(self, payload: dict[str, Any]) -> dict[str, Any]:
         issue = self._issue(payload["issue"])
@@ -305,20 +327,37 @@ class Host:
         # Persisted between sessions: issues read but not yet injected, files
         # already read, and how many command lines were consumed.
         self.state: dict[str, Any] = {"pending": list(issues or []), "command_cursor": 0, "ingested_files": []}
+        self._ingested_set: set[str] = set()
+        self._last_issues_stamp: tuple[int, int] | None = None
+        self._last_commands_stamp: tuple[int, int, int] | None = None
 
     def _pull_files(self) -> None:
+        if len(self._ingested_set) != len(self.state["ingested_files"]):
+            self._ingested_set = set(self.state["ingested_files"])
         if self.issues_dir and self.issues_dir.is_dir():
-            for path in sorted(self.issues_dir.glob("*.json")):
-                if path.name in self.state["ingested_files"]:
-                    continue
-                self.state["ingested_files"].append(path.name)
-                try:
-                    self.state["pending"].append(json.loads(path.read_text()))
-                except json.JSONDecodeError:
-                    self.state["pending"].append({"invalid": path.name})
+            st = self.issues_dir.stat()
+            stamp = (st.st_mtime_ns, st.st_ctime_ns)
+            if stamp != self._last_issues_stamp:
+                self._last_issues_stamp = stamp
+                new_paths = sorted(
+                    (p for p in self.issues_dir.iterdir()
+                     if p.is_file() and p.suffix == ".json" and p.name not in self._ingested_set),
+                    key=lambda p: p.name,
+                )
+                for path in new_paths:
+                    self._ingested_set.add(path.name)
+                    self.state["ingested_files"].append(path.name)
+                    try:
+                        self.state["pending"].append(json.loads(path.read_text()))
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        self.state["pending"].append({"invalid": path.name})
         if self.commands_file and self.commands_file.exists():
-            lines = [ln for ln in self.commands_file.read_text().splitlines() if ln.strip()]
-            self.commands = lines
+            cst = self.commands_file.stat()
+            cstamp = (cst.st_mtime_ns, cst.st_ctime_ns, cst.st_size)
+            if cstamp != self._last_commands_stamp:
+                self._last_commands_stamp = cstamp
+                lines = [ln for ln in self.commands_file.read_text().splitlines() if ln.strip()]
+                self.commands = lines
 
     def poll(self, kernel: Kernel) -> None:
         self._pull_files()
@@ -360,7 +399,7 @@ def build(
         fuel=cfg["reasoner_fuel"], regen=cfg["reasoner_regen"],
     )
     kernel.spawn(Commander(), fuel=fuel, regen=regen)
-    kernel.spawn(Defense("defense", forbidden=("delete",), **cfg["defense"]), fuel=fuel, regen=regen)
+    kernel.spawn(Defense("defense", forbidden=("delete",), guards=("action.*",), **cfg["defense"]), fuel=fuel, regen=regen)
     # After a lockdown, paused work resumes no faster than Defense's own rate limit.
     defense = {"max_actions": 20, "window": 5, **cfg["defense"]}
     pace = max(1, defense["max_actions"] // defense["window"])
@@ -373,21 +412,16 @@ def build(
 
 def report(kernel: Kernel, ledger: Ledger) -> dict[str, Any]:
     """Operational summary of one organism."""
-    events: dict[str, int] = {}
-    work_energy = 0.0
-    for record in kernel.trace:
-        events[record["event"]] = events.get(record["event"], 0) + 1
-        if record["event"] == "emit":
-            work_energy += Kernel.EMIT_COST
-        elif record["event"] == "spend":
-            work_energy += record["units"]
+    events = dict(kernel.stats["events"])
+    work_energy = float(kernel.stats["work_energy"])
     labelled = sum(1 for i in ledger.data["issues"].values() if i["labels"])
+    perception = kernel.cells["perception"].memory
     reflex = kernel.cells["reflex"].memory
     return {
         "tick": kernel.tick,
         "halted": kernel.halted,
-        "issues_seen": len(kernel.cells["perception"].memory["seen"]),
-        "issues_dropped": kernel.cells["perception"].memory["dropped"],
+        "issues_seen": perception.get("seen_total", len(perception["seen"])),
+        "issues_dropped": perception["dropped"],
         "issues_labelled": labelled,
         "issues_closed": sum(1 for i in ledger.data["issues"].values() if i["closed"]),
         "reflex_hits": reflex["hits"],
