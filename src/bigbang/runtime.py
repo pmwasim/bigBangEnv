@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .apps.caretaker import DEFAULT_CONFIG, Host, Ledger, build, report
+from .body import body_report, build_body
 from .kernel import Kernel
 
 
@@ -68,9 +69,15 @@ class Runner:
 
         saved = self.state.read_json("config.json")
         self.config = saved if resume and saved else {**DEFAULT_CONFIG, **(config or {})}
-        self.kernel, self.ledger = build(
-            self.config, ledger=Ledger(self.state.file("ledger.json"), auto_flush=False), brain=brain
-        )
+        ledger = Ledger(self.state.file("ledger.json"), auto_flush=False)
+        self.genome = None
+        self.organs = None
+        if self.config.get("organism") == "body":
+            self.kernel, self.ledger, self.genome, self.organs = build_body(
+                self.config, ledger=ledger, brain=brain
+            )
+        else:
+            self.kernel, self.ledger = build(self.config, ledger=ledger, brain=brain)
         self.host = Host(
             issues_dir=issues_dir, commands_file=commands_file,
             issues_per_tick=self.config["issues_per_tick"],
@@ -128,6 +135,8 @@ class Runner:
                 except ValueError:
                     pass
             self.save()
+        if self.genome is not None and self.organs is not None:
+            return body_report(self.kernel, self.ledger, self.genome, self.organs)
         return report(self.kernel, self.ledger)
 
 
@@ -141,7 +150,7 @@ def status(state_dir: str | Path) -> dict[str, Any]:
     for record in trace:
         counts[record["event"]] = counts.get(record["event"], 0) + 1
     ledger = state.read_json("ledger.json", {"issues": {}})
-    return {
+    result: dict[str, Any] = {
         "tick": snap["tick"],
         "halted": snap["halted"],
         "halt_requested": state.file("HALT").exists(),
@@ -158,6 +167,11 @@ def status(state_dir: str | Path) -> dict[str, Any]:
         "closed": sum(1 for i in ledger["issues"].values() if i["closed"]),
         "events": dict(sorted(counts.items())),
     }
+    if "operating_mode" in snap:
+        result["operating_mode"] = snap["operating_mode"]
+    if "hormones" in snap:
+        result["hormones"] = snap["hormones"]
+    return result
 
 
 def request_halt(state_dir: str | Path, reason: str = "operator") -> None:
@@ -199,7 +213,10 @@ def replay_trace(trace: list[dict[str, Any]], config: dict[str, Any]) -> tuple[b
     if config.get("brain") not in ("rule", "offline"):
         return False, f"brain {config.get('brain')!r} is not deterministic"
 
-    kernel, _ = build(config, ledger=Ledger())
+    if config.get("organism") == "body":
+        kernel, _, _, _ = build_body(config, ledger=Ledger())
+    else:
+        kernel, _ = build(config, ledger=Ledger())
     injects: dict[int, list[dict[str, Any]]] = {}
     halt: dict[str, Any] | None = None
     for record in trace:

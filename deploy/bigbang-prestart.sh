@@ -49,5 +49,7 @@ if [[ ! -f "$SNAPSHOT_FILE" ]]; then
     --issues "$ISSUES_DIR" \
     --commands "$COMMANDS_FILE" \
     --brain "${BIGBANG_BRAIN:-rule}" \
+    --organism "${BIGBANG_ORGANISM:-body}" \
+    --role "${BIGBANG_ROLE:-general}" \
     --ticks 1 >/dev/null 2>&1 || true
 fi

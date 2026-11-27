@@ -49,6 +49,9 @@
 | Atomic steps, quarantine, revive | `_run_cell`, `revive` | `quarantine`, `revive` | `test_crashing_cell_*`, `test_revive_*` |
 | Fail-closed guardians hold guarded topics when offline | `step`, `is_inhibited` | `hold` | `test_dormant_guardian_holds_actions_fail_closed` |
 | Bounded trace draining preserves cumulative stats | `drain_trace`, `snapshot` | — | `test_kernel_stats_and_drain_trace_preserve_report` |
+| Organ compartment isolation (`_organ.<name>.*`) | `_emit`, `_can_deliver_to_cell` | `denied`, `blocked` | `test_organ_compartment_isolation` |
+| Paracrine gradients decay and modulate hormones | `_emit_gradient`, `_update_hormones` | `mode` | `test_paracrine_gradient_and_hormonal_lockdown` |
+| Refractory cooldown limits cell re-triggering | `step` | — | `test_cell_refractory_cooldown` |
 | TTL decay | `step` | `expire` | `test_signals_expire_after_ttl` |
 | External kill switch | `halt` | `halt` | `test_kill_switch_stops_the_kernel` |
 | `KERNEL` trust never held by cells or input | `Cell`, `inject` | `ValueError` | `test_cells_cannot_hold_kernel_trust` |
