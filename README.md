@@ -33,7 +33,7 @@ No API key is needed anywhere. The real-model brain is a free local model, Qwen2
 
 ```bash
 pip install -e ".[dev]"            # add ,local for the free local model, ,claude for capped Claude
-pytest                             # 57 tests
+pytest                             # 76 tests
 bigbang eval                       # M1 exit-criteria suite
 python examples/first_light.py     # the kernel law in 40 lines
 examples/caretaker/operate.sh      # boot, replay, daemon, live input, kill switch, revive
@@ -57,7 +57,8 @@ See the [operations runbook](docs/OPERATIONS.md).
 - [Operations](docs/OPERATIONS.md) — state directory, CLI, incident playbook
 - [Evaluation](docs/EVALUATION.md) — M1 exit-criteria results
 - [Roadmap](docs/ROADMAP.md) — milestones M0–M4 with exit criteria
-- [Decisions](docs/decisions/) — ADRs 0001–0008
+- [Decisions](docs/decisions/) — ADRs 0001–0009
+- [AGENTS.md](AGENTS.md) — guide for coding agents · [handoff](AGENTS-HANDOFF.md)
 - [Review v0](docs/review-v0.md) · [Origin](docs/origin/gemini-conversation.md)
 
 ## Layout
