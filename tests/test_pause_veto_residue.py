@@ -214,6 +214,26 @@ def test_forbidden_verbs_never_run_even_after_a_lockdown_lifts():
     assert motor.memory["executed"] == 1  # the close resumes after the lockdown
 
 
+def test_snapshots_from_before_adr_0010_still_resume():
+    # PR #3 review (Codex): restored Defense/Motor memory lacked the new fields, so
+    # their first step raised and the kernel quarantined them.
+    kernel, ledger = build()
+    snap = kernel.snapshot()
+    defense = snap["cells"]["defense"]["memory"]
+    motor = snap["cells"]["motor"]["memory"]
+    defense.pop("vetoed_ids")
+    defense["recent"] = [[0, "action.close", '{"issue": 1}']]  # old 3-field entry
+    for key in ("expired", "resumed"):
+        motor.pop(key)
+    motor["pending"] = [[1, "action.close", {"issue": 7}]]  # old 3-field entry
+    fresh, ledger = build()
+    fresh.restore(snap)
+    run(fresh, Host(commands=["label 3 bug"] * 3), 10)
+    assert fresh.quarantined == set()
+    assert ledger.data["issues"]["7"]["closed"] is True
+    assert ledger.data["issues"]["3"]["labels"] == ["bug"]
+
+
 # ------------------------------------------ the loop breaker is scoped
 def test_loop_breaker_stops_only_the_repeated_action():
     kernel, ledger = build()

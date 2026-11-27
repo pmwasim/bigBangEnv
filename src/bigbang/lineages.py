@@ -78,6 +78,8 @@ class Motor(Cell):
         self._report(ctx, verb, {"status": "done", "action": payload, "result": result})
 
     def step(self, ctx: Context) -> None:
+        for key in ("expired", "resumed"):  # matter restored from before ADR-0010
+            self.memory.setdefault(key, 0)
         for signal in ctx.inbox:
             self.memory["pending"].append([ctx.tick + self.hold, signal.topic, signal.payload, signal.id, None])
 
@@ -151,6 +153,7 @@ class Defense(Cell):
         self.memory.update(recent=[], lockdowns=0, vetoes=0, mode="alert", vetoed_ids=[])
 
     def step(self, ctx: Context) -> None:
+        self.memory.setdefault("vetoed_ids", [])  # matter restored from before ADR-0010
         horizon = ctx.tick - self.window
         recent = [r for r in self.memory["recent"] if r[0] > horizon]
         forbidden: dict[str, list[int]] = {}

@@ -395,7 +395,7 @@ def report(kernel: Kernel, ledger: Ledger) -> dict[str, Any]:
             **{k: kernel.cells["reasoner"].memory[k] for k in ("thoughts", "outages", "deferred_low_fuel", "energy", "max_backlog")},
             "backlog": len(kernel.cells["reasoner"].memory["backlog"]),
         },
-        "motor": {k: kernel.cells["motor"].memory[k] for k in ("executed", "vetoed", "failed", "expired")},
+        "motor": {k: kernel.cells["motor"].memory.get(k, 0) for k in ("executed", "vetoed", "failed", "expired")},
         "backlogs": {name: len(kernel.cells[name].memory.get("backlog", kernel.cells[name].memory.get("unsent", [])))
                      for name in ("perception", "reflex", "reasoner", "commander", "motor")},
         "defense": {k: kernel.cells["defense"].memory[k] for k in ("mode", "vetoes", "lockdowns")},
