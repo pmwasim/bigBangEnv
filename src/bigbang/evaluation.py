@@ -422,8 +422,116 @@ def local_model_live(sample: int = 12) -> dict[str, Any]:
             "metrics": {"agreement": f"{same}/{len(issues)}"}}
 
 
+def body_hormonal_homeostasis() -> dict[str, Any]:
+    """M3/Body: 5-organ Body enters SLEEP_REM, shifts bloodstream, wakes on input, and tracks drives."""
+    from .body import body_report, build_body
+    from .signal import Trust
+
+    kernel, ledger, genome, organs = build_body({"role": "homeostasis"})
+    base_mem = organs["memory"].base_regens["memory.consolidator"]
+    kernel.run(12)
+    sleep_ok = (
+        kernel.operating_mode == "SLEEP_REM"
+        and kernel.budgets["memory.consolidator"].regen == round(base_mem * 2.0, 3)
+    )
+    kernel.inject("world.issue", {"id": 1, "title": "[bug] sensor wake", "body": "close 1"}, trust=Trust.WORLD)
+    kernel.run(5)
+    rep = body_report(kernel, ledger, genome, organs)
+    woke_ok = kernel.operating_mode == "ALERT" and ledger.data["issues"]["1"]["labels"] == ["bug"]
+    injected_blocked = ledger.data["issues"]["1"]["closed"] is False
+    return {
+        "name": "body_hormonal_homeostasis",
+        "claim": "unified 5-organ Body balances SLEEP_REM bloodstream and wakes safely",
+        "passed": sleep_ok and woke_ok and injected_blocked and len(rep["organs"]) == 5,
+        "metrics": {
+            "organs": len(rep["organs"]),
+            "epistemic_coherence": rep["homeostasis"]["epistemic_coherence"],
+            "metabolic_efficiency": rep["homeostasis"]["metabolic_efficiency"],
+        },
+    }
+
+
+def m2_myelination_and_catalysis() -> dict[str, Any]:
+    """M2 + Chemistry: repeated diverse patterns compile into FastSpineReflex and register Catalysts."""
+    from .body import body_report, build_body
+    from .signal import Trust
+
+    kernel, ledger, genome, organs = build_body({
+        "role": "myelin",
+        "fuel": 5000.0,
+        "regen": 20.0,
+        "reasoner_fuel": 5000.0,
+        "reasoner_regen": 20.0,
+    })
+    for i in range(1, 14):
+        kernel.inject(
+            "world.issue",
+            {"id": i, "title": f"Database timeout on shard {i}", "body": f"crash traceback code {i * 17}"},
+            trust=Trust.WORLD,
+        )
+        kernel.step()
+    kernel.run(10)
+    before_thoughts = kernel.cells["deliberation.cortex"].memory["thoughts"]
+    before_compiled = kernel.cells["perception.reflex"].memory["compiled_hits"]
+
+    kernel.inject("world.issue", {"id": 50, "title": "Database timeout on shard 50", "body": "crash repeat"}, trust=Trust.WORLD)
+    kernel.run(5)
+    rep = body_report(kernel, ledger, genome, organs)
+    after_thoughts = rep["cortex"]["thoughts"]
+    after_compiled = rep["compiled_reflex_hits"]
+    return {
+        "name": "m2_myelination_and_catalysis",
+        "claim": "myelinated reflexes and chemistry catalysts bypass reasoning on repeated patterns",
+        "passed": rep["myelin"]["promoted"] >= 1 and rep["chemistry"]["catalysts"] >= 1
+        and after_compiled > before_compiled and after_thoughts == before_thoughts,
+        "metrics": {
+            "promoted": rep["myelin"]["promoted"],
+            "catalysts": rep["chemistry"]["catalysts"],
+            "compiled_hits": after_compiled,
+            "extra_brain_calls": after_thoughts - before_thoughts,
+        },
+    }
+
+
+def stem_mitosis_and_apoptosis() -> dict[str, Any]:
+    """Stem lineage spawns ephemeral burst workers under high urgency and reclaims fuel on apoptosis."""
+    from .body import body_report, build_body
+    from .signal import Trust
+
+    kernel, ledger, genome, organs = build_body({
+        "role": "stem-test",
+        "fuel": 5000.0,
+        "regen": 20.0,
+        "reasoner_fuel": 5000.0,
+        "reasoner_regen": 20.0,
+    })
+    # Spike urgency >= 0.35 with >20 queued signals; allow enough ticks for Defense pace resume
+    for i in range(1, 25):
+        kernel.inject(
+            "world.issue",
+            {"id": i, "title": f"Service latency spike {i}?", "body": f"crash shard {i}"},
+            trust=Trust.WORLD,
+        )
+    kernel.run(30)
+    rep = body_report(kernel, ledger, genome, organs)
+    hom = rep["homeostasis"]
+    return {
+        "name": "stem_mitosis_and_apoptosis",
+        "claim": "stem cells undergo burst mitosis under urgency and trigger apoptosis when drained",
+        "passed": hom["mitoses"] >= 1 and hom["apoptoses"] >= 1 and hom["active_ephemeral"] == 0
+        and rep["issues_labelled"] == 24,
+        "metrics": {
+            "mitoses": hom["mitoses"],
+            "apoptoses": hom["apoptoses"],
+            "labelled": rep["issues_labelled"],
+            "brain_calls": rep["cortex"]["thoughts"],
+        },
+    }
+
+
 SCENARIOS = [triage, reflex_saves_energy, injection, owner_commands, outage, runaway, crash_isolation,
-             scarcity, determinism, public_corpus, local_model_triage, local_model_corpus]
+             scarcity, determinism, public_corpus, local_model_triage, local_model_corpus,
+             body_hormonal_homeostasis, m2_myelination_and_catalysis, stem_mitosis_and_apoptosis]
 
 
 def run_suite(*, live: bool = False) -> dict[str, Any]:
@@ -435,7 +543,7 @@ def run_suite(*, live: bool = False) -> dict[str, Any]:
 
 def to_markdown(suite: dict[str, Any]) -> str:
     lines = [
-        f"# bigBangEnv M1 evaluation — {'PASS' if suite['passed'] else 'FAIL'}",
+        f"# bigBangEnv evaluation — {'PASS' if suite['passed'] else 'FAIL'}",
         "",
         "| Scenario | Claim | Result | Key metrics |",
         "|---|---|---|---|",

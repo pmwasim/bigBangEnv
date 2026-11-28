@@ -147,3 +147,15 @@ class Context:
     def spend(self, units: float, reason: str = "") -> bool:
         """Declare work (e.g. LLM tokens) against this cell's budget."""
         return self._kernel._spend(self._cell, units, reason)
+
+    def recover_fuel(self, units: float, reason: str = "catabolism") -> float:
+        """Exothermic catabolism: recover previously spent fuel within budget capacity."""
+        return self._kernel._recover_fuel(self._cell, units, reason)
+
+    def spawn_worker(self, worker: Cell, *, fuel: float, reason: str = "burst") -> bool:
+        """Mitosis (stem cells only): spawn an ephemeral helper funded from this cell's budget."""
+        return self._kernel._spawn_ephemeral(self._cell, worker, fuel=fuel, reason=reason)
+
+    def apoptosis(self, reason: str = "complete") -> bool:
+        """Programmed termination for ephemeral workers, returning unused fuel to parent."""
+        return self._kernel._request_apoptosis(self._cell, reason=reason)

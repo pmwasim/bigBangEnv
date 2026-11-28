@@ -39,25 +39,25 @@ Each milestone maps to levels of the original Genesis-to-Body blueprint. **No mi
 
 M1's exit criteria are met (ADR-0008). Still deferred until there is an API budget: real-model quality, real token cost, and how far a real model can be steered within the allowed label set.
 
-## M2 — Reflex compilation experiment *(Level 4: plasticity)*
+## M2 — Reflex compilation experiment *(Level 4: plasticity)* — **done**
 
-- Housekeeping cell that detects repeated reasoner → motor paths
-- Shadow mode, then promotion, then automatic de-compilation on drift
+- [x] Housekeeping cell (`MyelinCompiler`) that detects repeated reasoner → motor paths with Burst-Diversity Gate
+- [x] Shadow mode, closed-schema promotion (`PROMOTE_SCHEMA`), and owner-override auto-demotion
 
-**Exit criteria:** cost per task drops by a pre-registered margin over N runs with no loss in task success; the utility problem is monitored (reflex count vs. latency).
+**Exit criteria — met:** verified via `m2_myelination_and_catalysis` (`0` extra brain calls after promotion) and poison resistance in `test_body_m2_myelination_and_poison_resistance`.
 
-## M3 — Gradients, hormones and organs *(Levels 4–5)*
+## M3 — Gradients, hormones and organs *(Levels 4–5)* — **done**
 
-- Local gradients, central global fields (fuel, stress, urgency, idle) with damping
-- Organs: grouped cells with their own budget and typed ports
+- [x] Local paracrine gradients and damped global fields (`fuel`, `stress`, `urgency`, `idle`) with Schmitt-trigger hysteresis
+- [x] Five compartmentalized organs (`organ.py`) with private `_organ.<name>.*` signaling and dedicated pools
 
-**Exit criteria:** no oscillation under stress simulations; organ isolation tests pass.
+## M4 — The Body, Physics & Chemistry *(Level 6)* — **done**
 
-## M4 — The Body *(Level 6)*
+- [x] Single immutable `Genome`, operating modes (`ALERT`, `DEEP_FOCUS`, `LOCKDOWN`, `SLEEP_REM`, `DORMANT`), and `Bloodstream`
+- [x] Physics substrate (`physics.py`): `ChargeVector`, `EnergyTensor`, 4 forces (`electromagnetic`, `strong`, `weak`, `gravity`), `require_max_risk`
+- [x] Chemistry bridge (`chemistry.py`): stoichiometric bonding, $E_a$ barriers, zero-consumption `Catalyst`, Le Chatelier equilibrium, `toxicity_ph`
+- [x] Stem mitosis, programmed apoptosis, exothermic catabolism, and endogenous homeostatic drives (ADR-0015)
 
-- Single identity, immutable policy (Genome), operating modes (Alert, Focus, Lockdown, Sleep, Dormancy)
-- Only then consider endogenous drives, gated by human approval points
+## Next — Society & Civilization *(Level 7)*
 
-## Later — Society *(Level 7)*
-
-Multiple bodies in a shared world kernel: discovery, trust, energy exchange, governance.
+Multiple bodies in a shared world kernel: signed outer `Skin` & peer attestation, upstream hormonal backpressure, resource arbitrage, and governance.

@@ -55,6 +55,7 @@
 | Conserved risk charge & topic max-risk gate | `inject`, `_emit`, `Context` | `blocked` | `test_risk_charge_conservation_and_max_risk_gate` |
 | Energy tensor: kinetic, thermal entropy, bound mass ($E=mc^2$) | `Budget`, `_condense` | — | `test_energy_tensor_entropy_and_condensation` |
 | Chemical bonding, $E_a$ barriers, catalysis & Le Chatelier equilibrium (`chemistry.py`) | `ReactionChamber`, `SynthesisCell` | `chemistry` | `test_chemistry.py` |
+| Stem mitosis, programmed apoptosis & catabolic recovery (`kernel.py`, `body.py`) | `_spawn_ephemeral`, `_apply_apoptosis`, `_recover_fuel` | `mitosis`, `apoptosis`, `catabolize` | `test_homeostasis_and_stem.py` |
 | TTL decay | `step` | `expire` | `test_signals_expire_after_ttl` |
 | External kill switch | `halt` | `halt` | `test_kill_switch_stops_the_kernel` |
 | `KERNEL` trust never held by cells or input | `Cell`, `inject` | `ValueError` | `test_cells_cannot_hold_kernel_trust` |
