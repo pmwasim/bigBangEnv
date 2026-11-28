@@ -15,6 +15,7 @@ from bigbang.observatory import (
     make_observatory_server,
 )
 from bigbang.runtime import Runner
+from bigbang.soul import Anatomy, Character
 from bigbang.world import SharedWorld, make_world_server
 
 
@@ -78,21 +79,34 @@ def test_observatory_demo_universe_beings_world_and_pulse(tmp_path: Path):
 
         world = uni["world"]
         assert world["tick"] > 0
-        assert {z["name"] for z in world["zones"]} == {"hub", "alpha-sector", "beta-sector", "frontier"}
+        assert {z["name"] for z in world["zones"]} == {"hub", "alpha-sector", "beta-sector", "playground", "frontier"}
         for z in world["zones"]:
             assert z["story"]
             assert z["mood"] in {"serene", "lively", "thirsty", "stirring"}
             assert 0.0 <= z["energy_pct"] <= 100.0
             assert 0.0 <= z["calmness"] <= 1.0
+            assert "x" in z and "y" in z and "z" in z
+
+        assert len(world["lands"]) == 5
+        assert len(world["homes"]) == 5
+        assert len(world["playgrounds"]) >= 1
+        assert len(world["paths"]) >= 5
+        assert len(world["doors"]) >= 5
+        assert world["competition"] is not None
+        assert len(uni["rewards_log"]) >= 1
 
         beings = uni["beings"]
-        assert len(beings) == 6
+        assert len(beings) == 10
         assert any(b["mode"] == "SLEEP_REM" for b in beings)
         for b in beings:
             assert len(b["organs"]) == 5
             assert {o["name"] for o in b["organs"]} == {"perception", "deliberation", "memory", "action", "defense"}
             assert set(b["soul"]) >= {"soul_id", "calling", "conscience", "karma"}
             assert set(b["character"]) == {"caution", "curiosity", "diligence", "altruism"}
+            assert set(b["anatomy"]) == {"eyes", "ears", "tongue", "hands", "legs"}
+            assert set(b["location"]) == {"zone", "x", "y", "z", "walk_state"}
+            assert b["home"]["id"] and b["action_story"]
+            assert "honor" in b and "rewards" in b and "punishments" in b
 
         chronicle = uni["chronicle"]
         expected_chapters = [
@@ -123,7 +137,7 @@ def test_observatory_demo_universe_beings_world_and_pulse(tmp_path: Path):
         assert code == 404
         assert missing["ok"] is False
 
-        # POST /api/pulse
+        # POST /api/pulse (curiosity, competition, reward, move)
         code, pulse = _http_json(
             f"{base}/api/pulse",
             method="POST",
@@ -133,6 +147,28 @@ def test_observatory_demo_universe_beings_world_and_pulse(tmp_path: Path):
         assert pulse["ok"] is True
         assert "Alpha Sanctuary" in pulse["acknowledgment"]
         assert pulse["entity"]["title"] == "Lantern shimmer in the east"
+
+        code, comp_res = _http_json(
+            f"{base}/api/pulse",
+            method="POST",
+            body={"zone": "playground", "spark": "Twilight Rhythm Trial", "kind": "competition"},
+        )
+        assert code == 200 and comp_res["ok"] is True
+        assert comp_res["competition"]["title"] == "Twilight Rhythm Trial"
+
+        code, rew_res = _http_json(
+            f"{base}/api/pulse",
+            method="POST",
+            body={"zone": "alpha-sector", "body_id": "bb-alpha-sentinel", "spark": "vigilant care", "kind": "reward"},
+        )
+        assert code == 200 and rew_res["ok"] is True
+
+        code, mv_res = _http_json(
+            f"{base}/api/pulse",
+            method="POST",
+            body={"zone": "hub", "body_id": "bb-gamma-scout", "target_zone": "hub", "kind": "move"},
+        )
+        assert code == 200 and mv_res["ok"] is True and mv_res["moved_to"] is not None
 
         # Invalid pulse rejected
         code, bad_pulse = _http_json(f"{base}/api/pulse", method="POST", body={"zone": "alpha-sector", "spark": "   "})
@@ -257,3 +293,14 @@ def test_cli_observatory_parser():
     assert args.world == "http://127.0.0.1:8787"
     assert args.demo is True
     assert args.incus is True
+
+
+def test_embodied_anatomy_and_role_presets():
+    for role in ("sentinel", "auditor", "scout", "arbiter", "triage", "planner", "executor", "artisan", "weaver"):
+        anat = Anatomy.for_role(role).to_dict()
+        assert set(anat) == {"eyes", "ears", "tongue", "hands", "legs"}
+        for part in anat.values():
+            assert 0.0 <= part["strength"] <= 1.0
+            assert part["role_story"]
+        ch = Character.for_role(role)
+        assert 0.0 <= ch.caution <= 1.0 and 0.0 <= ch.curiosity <= 1.0

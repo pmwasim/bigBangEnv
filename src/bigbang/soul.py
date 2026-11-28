@@ -68,6 +68,10 @@ class Character:
             "executor": cls(caution=0.80, curiosity=0.30, diligence=0.85, altruism=0.70),
             "planner": cls(caution=0.55, curiosity=0.90, diligence=0.80, altruism=0.70),
             "triage": cls(caution=0.65, curiosity=0.60, diligence=0.80, altruism=0.75),
+            "scout": cls(caution=0.50, curiosity=0.95, diligence=0.75, altruism=0.75),
+            "artisan": cls(caution=0.70, curiosity=0.75, diligence=0.95, altruism=0.80),
+            "arbiter": cls(caution=0.90, curiosity=0.55, diligence=0.90, altruism=0.85),
+            "weaver": cls(caution=0.65, curiosity=0.80, diligence=0.85, altruism=0.95),
         }
         return presets.get(role, cls())
 
@@ -158,3 +162,148 @@ class BeliefSystem:
         for k, v in data.items():
             bs.beliefs[str(k)] = Belief.from_dict(v)
         return bs
+
+
+@dataclass(frozen=True)
+class AnatomyPart:
+    """One embodied sensory or motor appendage with bounded strength [0.0..1.0]."""
+
+    strength: float = 0.7
+    active: bool = True
+    role_story: str = ""
+
+    def __post_init__(self) -> None:
+        val = float(self.strength)
+        if not (0.0 <= val <= 1.0):
+            raise ValueError(f"strength must be in [0.0..1.0], got {val}")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "strength": round(float(self.strength), 3),
+            "active": bool(self.active),
+            "role_story": self.role_story,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AnatomyPart:
+        return cls(
+            strength=float(data.get("strength", 0.7)),
+            active=bool(data.get("active", True)),
+            role_story=str(data.get("role_story", "")),
+        )
+
+
+_ANATOMY_ROLE_DATA: dict[str, dict[str, tuple[float, str]]] = {
+    "sentinel": {
+        "eyes": (0.94, "Keen far-seeing eyes sweep the horizon for subtle shifts."),
+        "ears": (0.90, "Attentive ears catch faint whispers drifting across bridges."),
+        "tongue": (0.68, "Steady voice calls clear warnings when needed."),
+        "hands": (0.72, "Ready hands hold the sanctuary gate calm and firm."),
+        "legs": (0.76, "Sure-footed legs patrol the outer paths tirelessly."),
+    },
+    "auditor": {
+        "eyes": (0.95, "Discerning eyes spot the smallest inconsistency in any pattern."),
+        "ears": (0.80, "Patient ears listen closely to every account."),
+        "tongue": (0.86, "Measured voice speaks truths clearly and kindly."),
+        "hands": (0.68, "Careful hands record and seal verified findings."),
+        "legs": (0.62, "Deliberate legs walk steadily between realms."),
+    },
+    "scout": {
+        "eyes": (0.92, "Wide-horizon eyes spot distant wonders and changing weather."),
+        "ears": (0.78, "Quick ears tune into wind and footsteps far ahead."),
+        "tongue": (0.65, "Crisp voice relays discoveries back home."),
+        "hands": (0.64, "Light hands sketch trail markers along new ground."),
+        "legs": (0.96, "Swift, tireless legs bound across hills and bridges."),
+    },
+    "arbiter": {
+        "eyes": (0.88, "Balanced eyes weigh every side with calm fairness."),
+        "ears": (0.92, "Empathetic ears hear the unspoken nuance in every voice."),
+        "tongue": (0.94, "Resonant voice brings harmony and fair judgment."),
+        "hands": (0.70, "Gentle hands award honor and restore balance."),
+        "legs": (0.68, "Composed legs step into the arena to preside."),
+    },
+    "triage": {
+        "eyes": (0.78, "Quick eyes read arriving sparks at a glance."),
+        "ears": (0.80, "Warm ears greet every newcomer's call."),
+        "tongue": (0.92, "Welcoming voice names and guides new thoughts clearly."),
+        "hands": (0.76, "Nimble hands sort incoming threads gently."),
+        "legs": (0.72, "Agile legs move swiftly around the sanctuary."),
+    },
+    "planner": {
+        "eyes": (0.82, "Farsighted eyes trace pathways across the whole cosmos."),
+        "ears": (0.76, "Thoughtful ears gather quiet hints from neighbors."),
+        "tongue": (0.90, "Articulate voice shares clear visions and invitations."),
+        "hands": (0.68, "Skilled hands map constellations and trials."),
+        "legs": (0.86, "Wandering legs roam freely from Hearth to Horizon."),
+    },
+    "executor": {
+        "eyes": (0.72, "Focused eyes lock onto the task at hand."),
+        "ears": (0.66, "Practical ears listen for clear directions."),
+        "tongue": (0.65, "Concise voice confirms work completed."),
+        "hands": (0.96, "Masterful hands turn intentions into finished craft."),
+        "legs": (0.88, "Energetic legs carry effort wherever it is needed."),
+    },
+    "artisan": {
+        "eyes": (0.78, "Appreciative eyes notice beauty, symmetry, and detail."),
+        "ears": (0.70, "Calm ears enjoy the ambient hum of creation."),
+        "tongue": (0.72, "Warm voice shares stories behind each creation."),
+        "hands": (0.95, "Deft, expressive hands shape delicate wonders."),
+        "legs": (0.70, "Unrushed legs wander between workshop and hearth."),
+    },
+    "weaver": {
+        "eyes": (0.74, "Gentle eyes see how distant threads belong together."),
+        "ears": (0.90, "Deeply tuned ears hear harmonies between habitats."),
+        "tongue": (0.80, "Soothing voice bridges conversations across realms."),
+        "hands": (0.92, "Graceful hands weave shared bonds and living light."),
+        "legs": (0.74, "Light legs cross doors to connect companions."),
+    },
+    "general": {
+        "eyes": (0.74, "Watchful eyes take in the glow of the surrounding land."),
+        "ears": (0.74, "Open ears listen gently to neighboring voices."),
+        "tongue": (0.74, "Friendly voice greets companions along the path."),
+        "hands": (0.74, "Helpful hands lend care wherever a spark lands."),
+        "legs": (0.74, "Steady legs explore paths between sanctuaries."),
+    },
+}
+
+
+@dataclass(frozen=True)
+class Anatomy:
+    """Embodied sensory & motor morphology of an organism (eyes, ears, tongue, hands, legs)."""
+
+    eyes: AnatomyPart
+    ears: AnatomyPart
+    tongue: AnatomyPart
+    hands: AnatomyPart
+    legs: AnatomyPart
+
+    @classmethod
+    def for_role(cls, role: str) -> Anatomy:
+        spec = _ANATOMY_ROLE_DATA.get(role, _ANATOMY_ROLE_DATA["general"])
+        return cls(
+            eyes=AnatomyPart(strength=spec["eyes"][0], active=True, role_story=spec["eyes"][1]),
+            ears=AnatomyPart(strength=spec["ears"][0], active=True, role_story=spec["ears"][1]),
+            tongue=AnatomyPart(strength=spec["tongue"][0], active=True, role_story=spec["tongue"][1]),
+            hands=AnatomyPart(strength=spec["hands"][0], active=True, role_story=spec["hands"][1]),
+            legs=AnatomyPart(strength=spec["legs"][0], active=True, role_story=spec["legs"][1]),
+        )
+
+    def to_dict(self) -> dict[str, dict[str, Any]]:
+        return {
+            "eyes": self.eyes.to_dict(),
+            "ears": self.ears.to_dict(),
+            "tongue": self.tongue.to_dict(),
+            "hands": self.hands.to_dict(),
+            "legs": self.legs.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Anatomy:
+        default = cls.for_role("general")
+        return cls(
+            eyes=AnatomyPart.from_dict(data["eyes"]) if "eyes" in data else default.eyes,
+            ears=AnatomyPart.from_dict(data["ears"]) if "ears" in data else default.ears,
+            tongue=AnatomyPart.from_dict(data["tongue"]) if "tongue" in data else default.tongue,
+            hands=AnatomyPart.from_dict(data["hands"]) if "hands" in data else default.hands,
+            legs=AnatomyPart.from_dict(data["legs"]) if "legs" in data else default.legs,
+        )

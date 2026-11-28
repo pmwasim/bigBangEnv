@@ -1,86 +1,119 @@
-// The Living Cosmos — Pure ES Module Biosphere Canvas, Voice & Chimes
+// The Living Cosmos — Pure ES Module 3D Embodied World, Voice & Chimes
 
-const POLL_INTERVAL_MS = 3500;
+const POLL_INTERVAL_MS = 3200;
 const RING_RADIUS_LARGE = 32;
-const RING_CIRC_LARGE = 2 * Math.PI * RING_RADIUS_LARGE;
 const RING_RADIUS_SMALL_OUTER = 26;
 const RING_RADIUS_SMALL_INNER = 19;
 
-const ZONE_STYLE = {
+const ZONE_3D = {
   hub: {
     label: "The Central Hearth",
-    rx: 0.50,
-    ry: 0.33,
-    radiusFactor: 0.132,
+    x: 0,
+    y: -30,
+    z: 24,
+    radius: 96,
     hue: "#4fe3c1",
+    edgeHue: "#1f9c88",
     glow: "rgba(79, 227, 193, 0.28)",
   },
   "alpha-sector": {
     label: "Alpha Sanctuary",
-    rx: 0.30,
-    ry: 0.25,
-    radiusFactor: 0.112,
+    x: -345,
+    y: -155,
+    z: 12,
+    radius: 92,
     hue: "#60d9f6",
-    glow: "rgba(96, 217, 246, 0.24)",
+    edgeHue: "#257da3",
+    glow: "rgba(96, 217, 246, 0.26)",
   },
   "beta-sector": {
     label: "Beta Frontier",
-    rx: 0.70,
-    ry: 0.25,
-    radiusFactor: 0.112,
+    x: 345,
+    y: -155,
+    z: 14,
+    radius: 92,
     hue: "#f6c46d",
-    glow: "rgba(246, 196, 109, 0.22)",
+    edgeHue: "#a87729",
+    glow: "rgba(246, 196, 109, 0.24)",
+  },
+  playground: {
+    label: "Starlight Playground",
+    x: 0,
+    y: 185,
+    z: 18,
+    radius: 90,
+    hue: "#ffdfa3",
+    edgeHue: "#9f7aea",
+    glow: "rgba(255, 223, 163, 0.25)",
   },
   frontier: {
     label: "Far Horizon",
-    rx: 0.50,
-    ry: 0.53,
-    radiusFactor: 0.105,
+    x: 0,
+    y: 405,
+    z: 34,
+    radius: 88,
     hue: "#a78bfa",
-    glow: "rgba(167, 139, 250, 0.25)",
+    edgeHue: "#6447b5",
+    glow: "rgba(167, 139, 250, 0.26)",
   },
 };
 
 const DEFAULT_CHAPTERS = [
   {
     title: "Genesis & Physics",
+    era: "Era I · First Light",
     status: "Alive at the core",
-    story: "Conserved charges, energy flow, and gentle entropy bounds formed the first natural laws of this cosmos.",
+    summary: "Conserved charges, energy flow, and gentle entropy bounds formed the first natural laws of this cosmos.",
+    essence: "Energy moves like breath; nothing vanishes without trace.",
   },
   {
     title: "Chemistry & Bonding",
+    era: "Era II · First Bonds",
     status: "Woven into perception",
-    story: "Molecules bond through catalysis and gentle activation thresholds, turning scattered hints into coherent meaning.",
+    summary: "Molecules bond through catalysis and gentle activation thresholds, turning scattered hints into coherent meaning.",
+    essence: "Small sparks meet and become whole understandings.",
   },
   {
     title: "Living Body & Five Organs",
+    era: "Era III · First Heartbeat",
     status: "Breathing continuously",
-    story: "Perception, deliberation, memory, action, and defense beat together inside an immutable genome.",
+    summary: "Perception, deliberation, memory, action, and defense beat together inside an immutable genome.",
+    essence: "Five quiet organs listen, reflect, remember, act, and protect.",
   },
   {
     title: "Homeostasis & Stem Renewal",
+    era: "Era IV · Self-Healing",
     status: "Self-healing",
-    story: "Tissues divide when needed, rest in dreaming renewal, and recycle tired matter back into vital energy.",
+    summary: "Tissues divide when needed, rest in dreaming renewal, and recycle tired matter back into vital energy.",
+    essence: "Even rest is creative; dreams turn yesterday into strength.",
   },
   {
     title: "Society & Protective Skin",
+    era: "Era V · Fellowship",
     status: "Harmonic fellowship",
-    story: "Neighbors verify one another with trust, share territory gently, and shield against harsh outside storms.",
+    summary: "Neighbors verify one another with trust, share territory gently, and shield against harsh outside storms.",
+    essence: "Trust travels softly between sovereign companions.",
   },
   {
     title: "Evolution & Living Senses",
+    era: "Era VI · Awakening Senses",
     status: "Listening & adapting",
-    story: "Safe evolutionary trials and real vessel senses connect each organism to the living machine beneath it.",
+    summary: "Safe evolutionary trials and real vessel senses connect each organism to the living machine beneath it.",
+    essence: "Grounded in real hardware warmth and gentle adaptation.",
   },
   {
     title: "Shared & Relative Worlds",
+    era: "Era VII · Lands, Paths & Doors",
     status: "Unfolding now",
-    story: "Habitats pulse with finite warmth and rivers of light while every creature experiences its own personal horizon.",
+    summary: "Lands, cozy homes, winding paths, luminous doors, and playground trials form a living world shared by all.",
+    essence: "Every step across a path or doorway carries a story.",
   },
   {
-    title: "Soul, Character & Beliefs",
+    title: "Soul, Character & Embodied Life",
+    era: "Era VIII · Eyes, Ears, Hands & Soul",
     status: "Awakened",
-    story: "Each being carries an unshakeable calling, a temperament constellation, and evolving beliefs shaped by lived experience.",
+    summary: "Each being walks with eyes, ears, tongue, hands, legs, an immutable calling, and honor earned in community.",
+    essence: "Embodied life shaped by kindness, curiosity, and truth.",
   },
 ];
 
@@ -88,7 +121,7 @@ const state = {
   universe: null,
   selectedBeingId: null,
   selectedBeingWorld: null,
-  hoveredBeingId: null,
+  hoveredHit: null,
   lastTick: -1,
   lastBulletinId: null,
   lastEventIds: new Set(),
@@ -100,11 +133,33 @@ const state = {
   beingsAnim: new Map(),
   ripples: [],
   filaments: [],
+  fxBursts: [],
   stars: [],
-  zonePositions: new Map(),
+  zoneNodes: new Map(),
+  doorFlashes: new Map(),
+  hitTargets: [],
   canvasWidth: 0,
   canvasHeight: 0,
   dpr: 1,
+  camera: {
+    mode: "iso", // "iso" | "arena" | "follow"
+    yaw: -0.34,
+    pitch: 0.72,
+    zoom: 0.92,
+    tx: 0,
+    ty: 75,
+    tz: 18,
+    targetTx: 0,
+    targetTy: 75,
+    targetTz: 18,
+    targetYaw: -0.34,
+    targetPitch: 0.72,
+    targetZoom: 0.92,
+    dragging: false,
+    dragMoved: false,
+    lastPointerX: 0,
+    lastPointerY: 0,
+  },
 };
 
 // DOM references
@@ -117,6 +172,15 @@ const narrativeHeadlineEl = document.getElementById("narrative-headline");
 const narrativeStoryEl = document.getElementById("narrative-story");
 const whisperVoiceStateEl = document.getElementById("whisper-voice-state");
 const beingsStripEl = document.getElementById("beings-strip");
+
+// Camera Controls DOM
+const camIsoBtn = document.getElementById("cam-iso-btn");
+const camArenaBtn = document.getElementById("cam-arena-btn");
+const camFollowBtn = document.getElementById("cam-follow-btn");
+const camZoomInBtn = document.getElementById("cam-zoom-in");
+const camZoomOutBtn = document.getElementById("cam-zoom-out");
+const competitionBannerEl = document.getElementById("competition-banner");
+const competitionTextEl = document.getElementById("competition-text");
 
 // Voice & Sound DOM
 const voicePillBtn = document.getElementById("voice-sound-btn");
@@ -147,11 +211,12 @@ const metricMemEl = document.getElementById("metric-mem");
 const metricDiskEl = document.getElementById("metric-disk");
 const metricUptimeEl = document.getElementById("metric-uptime");
 
-// Spark Form DOM
+// Spark & Trial Form DOM
 const sparkForm = document.getElementById("spark-form");
 const sparkZoneEl = document.getElementById("spark-zone");
 const sparkKindEl = document.getElementById("spark-kind");
 const sparkInputEl = document.getElementById("spark-input");
+const startTrialBtn = document.getElementById("start-trial-btn");
 const sparkFeedbackEl = document.getElementById("spark-feedback");
 
 // Being Drawer DOM
@@ -163,6 +228,9 @@ const drawerBeingNameEl = document.getElementById("drawer-being-name");
 const drawerMoodPhraseEl = document.getElementById("drawer-mood-phrase");
 const hearBeingBtn = document.getElementById("hear-being-btn");
 const drawerKarmaPillEl = document.getElementById("drawer-karma-pill");
+const drawerLifePlaceEl = document.getElementById("drawer-life-place");
+const drawerAnatomyListEl = document.getElementById("drawer-anatomy-list");
+const drawerHonorLedgerEl = document.getElementById("drawer-honor-ledger");
 const drawerSoulCallingEl = document.getElementById("drawer-soul-calling");
 const drawerConscienceEl = document.getElementById("drawer-conscience");
 const constellationSvg = document.getElementById("character-constellation");
@@ -185,11 +253,11 @@ const chaptersTimelineEl = document.getElementById("chapters-timeline");
 const eventsChronicleEl = document.getElementById("events-chronicle");
 
 // ---------------------------------------------------------------------------
-// Helpers: Organic Naming, Colors & Formatting (No dry dev phrasing)
+// Helpers: Organic Naming, Viewport Clamping & Formatting
 // ---------------------------------------------------------------------------
 function prettifyZone(zoneName) {
   if (!zoneName) return "Sanctuary";
-  if (ZONE_STYLE[zoneName]) return ZONE_STYLE[zoneName].label;
+  if (ZONE_3D[zoneName]) return ZONE_3D[zoneName].label;
   return String(zoneName)
     .replace(/[-_]+/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
@@ -237,8 +305,10 @@ function toneColor(tone) {
   const t = String(tone || "").toLowerCase();
   if (t.includes("dream") || t.includes("violet") || t.includes("rem")) return "#a78bfa";
   if (t.includes("curious") || t.includes("cyan")) return "#60d9f6";
-  if (t.includes("warm") || t.includes("soul") || t.includes("gold") || t.includes("spark")) return "#f6c46d";
-  if (t.includes("alert") || t.includes("coral") || t.includes("warn")) return "#fb8a70";
+  if (t.includes("reward") || t.includes("warm") || t.includes("soul") || t.includes("gold") || t.includes("spark")) {
+    return "#f6c46d";
+  }
+  if (t.includes("punish") || t.includes("alert") || t.includes("coral") || t.includes("warn")) return "#fb8a70";
   return "#4fe3c1";
 }
 
@@ -252,6 +322,40 @@ function setRingFraction(circleEl, radius, fraction) {
 
 function clearEl(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
+}
+
+function positionPopoverInViewport(popoverEl, anchorEl) {
+  if (!popoverEl || popoverEl.classList.contains("hidden") || !anchorEl) return;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const anchorRect = anchorEl.getBoundingClientRect();
+  const margin = 12;
+
+  if (vw <= 760) {
+    const top = Math.min(Math.max(margin, anchorRect.bottom + 8), Math.max(margin, vh * 0.26));
+    popoverEl.style.left = `${margin}px`;
+    popoverEl.style.right = `${margin}px`;
+    popoverEl.style.top = `${Math.round(top)}px`;
+    popoverEl.style.maxHeight = `${Math.max(180, Math.round(vh - top - margin))}px`;
+    return;
+  }
+
+  popoverEl.style.right = "auto";
+  const popRect = popoverEl.getBoundingClientRect();
+  const popW = Math.min(popRect.width || 320, vw - margin * 2);
+  const popH = Math.min(popRect.height || 320, vh - margin * 2);
+
+  let left = anchorRect.right - popW;
+  left = Math.max(margin, Math.min(left, vw - popW - margin));
+
+  let top = anchorRect.bottom + 10;
+  if (top + popH > vh - margin) {
+    top = Math.max(margin, vh - popH - margin);
+  }
+
+  popoverEl.style.left = `${Math.round(left)}px`;
+  popoverEl.style.top = `${Math.round(top)}px`;
+  popoverEl.style.maxHeight = `${Math.round(vh - top - margin)}px`;
 }
 
 // ---------------------------------------------------------------------------
@@ -277,9 +381,10 @@ function playHarmonicChime(kind = "pulse") {
   try {
     const now = ac.currentTime;
     const scales = {
-      pulse: [392.0, 493.88, 587.33], // G4, B4, D5
-      spark: [440.0, 554.37, 659.25, 880.0], // A major ethereal
-      select: [329.63, 440.0, 523.25], // soft triad
+      pulse: [392.0, 493.88, 587.33],
+      spark: [440.0, 554.37, 659.25, 880.0],
+      reward: [523.25, 659.25, 783.99, 1046.5],
+      select: [329.63, 440.0, 523.25],
     };
     const notes = scales[kind] || scales.pulse;
     notes.forEach((freq, idx) => {
@@ -296,7 +401,7 @@ function playHarmonicChime(kind = "pulse") {
       osc.stop(now + idx * 0.08 + 1.5);
     });
   } catch {
-    // Audio playback cleanly ignored if blocked by browser policy
+    // Ignored cleanly if blocked
   }
 }
 
@@ -351,7 +456,7 @@ function speakText(text, { force = false, rate = 0.96, pitch = 1.0 } = {}) {
     };
     window.speechSynthesis.speak(utter);
   } catch {
-    // Graceful no-op if speech synthesis unavailable
+    // Safe no-op
   }
 }
 
@@ -367,10 +472,10 @@ function syncVoiceUI() {
 }
 
 // ---------------------------------------------------------------------------
-// Canvas Geometry, Bioluminescent Habitats & Organisms
+// 3D Camera Projection & Spatial World Geometry
 // ---------------------------------------------------------------------------
 function initStars() {
-  state.stars = Array.from({ length: 85 }, () => ({
+  state.stars = Array.from({ length: 95 }, () => ({
     x: Math.random(),
     y: Math.random(),
     r: 0.5 + Math.random() * 1.5,
@@ -386,34 +491,94 @@ function resizeCanvas() {
   canvas.width = Math.floor(state.canvasWidth * state.dpr);
   canvas.height = Math.floor(state.canvasHeight * state.dpr);
   ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
-  computeZonePositions();
+
+  if (state.canvasWidth <= 760 && state.camera.mode === "iso") {
+    state.camera.targetZoom = 0.76;
+    state.camera.zoom = 0.76;
+  }
+
+  positionPopoverInViewport(voicePopoverEl, voicePillBtn);
+  positionPopoverInViewport(vitalityPopoverEl, vitalityPillBtn);
 }
 
-function computeZonePositions() {
+function project3D(wx, wy, wz) {
+  const cam = state.camera;
+  const rx = wx - cam.tx;
+  const ry = wy - cam.ty;
+  const rz = wz - cam.tz;
+
+  const cy = Math.cos(cam.yaw);
+  const sy = Math.sin(cam.yaw);
+  const x1 = rx * cy - ry * sy;
+  const y1 = rx * sy + ry * cy;
+
+  const cp = Math.cos(cam.pitch);
+  const sp = Math.sin(cam.pitch);
+  const y2 = y1 * cp - rz * sp;
+  const z2 = y1 * sp + rz * cp;
+
+  const focal = 1100;
+  const depth = Math.max(-520, z2);
+  const persp = focal / (focal + 540 - depth);
+  const isPhone = state.canvasWidth <= 760;
+  const baseScale = isPhone ? (state.canvasWidth / 560) : (Math.min(state.canvasWidth, state.canvasHeight) / 840);
+  const scale = persp * cam.zoom * baseScale;
+
+  const drawerShift = state.selectedBeingId && state.canvasWidth > 980 ? -185 : 0;
+  const cx = state.canvasWidth * 0.5 + drawerShift;
+  const cyScreen = state.canvasHeight * (isPhone ? 0.42 : 0.43);
+
+  return {
+    sx: cx + x1 * scale,
+    sy: cyScreen + y2 * scale * 0.86 - rz * scale * 0.42,
+    depth,
+    scale,
+  };
+}
+
+function worldCoordsForZone(zone, idx = 0) {
+  const preset = ZONE_3D[zone?.name];
+  if (preset) {
+    return {
+      x: preset.x,
+      y: preset.y,
+      z: preset.z,
+      radius: preset.radius,
+      rawX: Number(zone?.x ?? preset.x),
+      rawY: Number(zone?.y ?? preset.y),
+      rawZ: Number(zone?.z ?? preset.z),
+    };
+  }
+  if (zone && zone.x != null && zone.y != null) {
+    return {
+      x: Number(zone.x) * 1.55,
+      y: Number(zone.y) * 1.65,
+      z: Number(zone.z ?? 10) * 1.6,
+      radius: Number(zone.radius ?? 130) * 0.68,
+      rawX: Number(zone.x),
+      rawY: Number(zone.y),
+      rawZ: Number(zone.z ?? 10),
+    };
+  }
+  return [
+    { x: 0, y: -30, z: 24, radius: 96, rawX: 0, rawY: 0, rawZ: 14 },
+    { x: -345, y: -155, z: 12, radius: 92, rawX: -245, rawY: -110, rawZ: 6 },
+    { x: 345, y: -155, z: 14, radius: 92, rawX: 245, rawY: -110, rawZ: 6 },
+    { x: 0, y: 185, z: 18, radius: 90, rawX: 0, rawY: 110, rawZ: 10 },
+    { x: 0, y: 405, z: 34, radius: 88, rawX: 0, rawY: 255, rawZ: 22 },
+  ][idx % 5];
+}
+
+function syncZoneNodes() {
   const zones = state.universe?.world?.zones || [];
-  const rawW = state.canvasWidth || window.innerWidth;
-  const h = state.canvasHeight || window.innerHeight;
-  const drawerActive = Boolean(state.selectedBeingId) && rawW > 980;
-  const w = drawerActive ? Math.max(540, rawW - 410) : rawW;
-  const minDim = Math.min(w, h);
-  state.zonePositions.clear();
-
-  const fallbackOrder = [
-    { rx: 0.50, ry: 0.33, radiusFactor: 0.132 },
-    { rx: 0.30, ry: 0.25, radiusFactor: 0.112 },
-    { rx: 0.70, ry: 0.25, radiusFactor: 0.112 },
-    { rx: 0.50, ry: 0.53, radiusFactor: 0.105 },
-    { rx: 0.29, ry: 0.49, radiusFactor: 0.10 },
-    { rx: 0.71, ry: 0.49, radiusFactor: 0.10 },
-  ];
-
+  state.zoneNodes.clear();
   zones.forEach((zone, idx) => {
-    const preset = ZONE_STYLE[zone.name] || fallbackOrder[idx % fallbackOrder.length];
-    state.zonePositions.set(zone.name, {
-      x: w * preset.rx,
-      y: h * preset.ry,
-      r: Math.max(60, minDim * (preset.radiusFactor || 0.112)),
+    const preset = ZONE_3D[zone.name] || {};
+    const coords = worldCoordsForZone(zone, idx);
+    state.zoneNodes.set(zone.name, {
+      ...coords,
       hue: preset.hue || "#4fe3c1",
+      edgeHue: preset.edgeHue || "#1e7c6d",
       glow: preset.glow || "rgba(79, 227, 193, 0.24)",
       label: zone.label || prettifyZone(zone.name),
       zone,
@@ -421,31 +586,36 @@ function computeZonePositions() {
   });
 }
 
-function triggerRipple(zoneName, color = "#4fe3c1", strength = 1.0) {
-  const pos = state.zonePositions.get(zoneName) || [...state.zonePositions.values()][0];
-  if (!pos) return;
-  state.ripples.push({
-    x: pos.x,
-    y: pos.y,
-    r: pos.r * 0.25,
-    maxR: pos.r * (1.7 + strength * 0.6),
-    alpha: 0.75,
-    color,
-  });
+function getZoneCenter(zoneName) {
+  return state.zoneNodes.get(zoneName) || state.zoneNodes.get("hub") || { x: 0, y: 0, z: 10, radius: 95 };
 }
 
-function triggerFilament(fromZone, toZone, color = "#f6c46d") {
-  const a = state.zonePositions.get(fromZone);
-  const b = state.zonePositions.get(toZone);
-  if (!a || !b || a === b) return;
-  state.filaments.push({
-    x1: a.x,
-    y1: a.y,
-    x2: b.x,
-    y2: b.y,
-    progress: 0,
-    color,
-  });
+function resolvePlaceWorldCoords(place, fallbackZone = "hub", offsetIdx = 0) {
+  const zc = getZoneCenter(place?.zone || fallbackZone);
+  if (place && place.x != null && place.y != null && zc.rawX != null) {
+    const dx = Math.max(-zc.radius * 0.55, Math.min(zc.radius * 0.55, Number(place.x) - zc.rawX));
+    const dy = Math.max(-zc.radius * 0.55, Math.min(zc.radius * 0.55, Number(place.y) - zc.rawY));
+    return {
+      x: zc.x + dx,
+      y: zc.y + dy,
+      z: zc.z,
+    };
+  }
+  const angle = offsetIdx * 1.65 + 0.5;
+  return {
+    x: zc.x + Math.cos(angle) * (zc.radius * 0.48),
+    y: zc.y + Math.sin(angle) * (zc.radius * 0.44),
+    z: zc.z,
+  };
+}
+
+function resolvePlaygroundCoords() {
+  const pgs = state.universe?.world?.playgrounds || [];
+  if (pgs.length) {
+    return resolvePlaceWorldCoords(pgs[0], pgs[0].zone || "playground", 0);
+  }
+  const f = getZoneCenter("playground");
+  return { x: f.x, y: f.y, z: f.z + 2 };
 }
 
 function syncBeingsAnimationState(beings) {
@@ -459,36 +629,74 @@ function syncBeingsAnimationState(beings) {
 
   beings.forEach((being) => {
     seenIds.add(being.id);
-    const zPos = state.zonePositions.get(being.zone) || state.zonePositions.get("hub") || {
-      x: state.canvasWidth * 0.5,
-      y: state.canvasHeight * 0.45,
-      r: 110,
-    };
+    const zc = getZoneCenter(being.zone);
     const siblings = zoneBuckets.get(being.zone || "hub") || [being];
     const indexInZone = siblings.indexOf(being);
-    const angleOffset = (indexInZone / Math.max(1, siblings.length)) * Math.PI * 2;
-    const orbitDist = siblings.length === 1 ? zPos.r * 0.22 : zPos.r * 0.48;
-    const anchorX = zPos.x + Math.cos(angleOffset) * orbitDist;
-    const anchorY = zPos.y + Math.sin(angleOffset) * orbitDist;
+    const count = siblings.length;
+    const walkState = String(being.location?.walk_state || "");
+
+    let tx;
+    let ty;
+    let tz;
+    if (walkState === "crossing_door" && being.location?.x != null && zc.rawX != null) {
+      const dx = Number(being.location.x) - zc.rawX;
+      const dy = Number(being.location.y) - zc.rawY;
+      tx = zc.x + dx * 1.35;
+      ty = zc.y + dy * 1.35;
+      tz = zc.z + 4;
+    } else if (count === 1) {
+      tx = zc.x + zc.radius * 0.24;
+      ty = zc.y + zc.radius * 0.22;
+      tz = zc.z + 2;
+    } else {
+      // Spread siblings cleanly across the island terrace so no bodies or labels stack
+      const angleOffset = (indexInZone / count) * Math.PI * 2 + 0.35;
+      const orbitDist = Math.min(zc.radius * 0.68, Math.max(46, count * 14));
+      tx = zc.x + Math.cos(angleOffset) * orbitDist;
+      ty = zc.y + Math.sin(angleOffset) * (orbitDist * 0.86);
+      tz = zc.z + (walkState === "competing_playground" ? 6 : 2);
+    }
 
     const existing = state.beingsAnim.get(being.id);
     if (!existing) {
       state.beingsAnim.set(being.id, {
-        x: anchorX,
-        y: anchorY,
-        targetX: anchorX,
-        targetY: anchorY,
+        wx: tx,
+        wy: ty,
+        wz: tz,
+        targetX: tx,
+        targetY: ty,
+        targetZ: tz,
         phase: Math.random() * Math.PI * 2,
-        radius: 21,
+        blinkTimer: 1.5 + Math.random() * 3.5,
+        rewardTimer: 0,
+        punishTimer: 0,
+        speakTimer: 0,
+        prevRewards: Number(being.rewards ?? 0),
+        prevPunishments: Number(being.punishments ?? 0),
         being,
       });
     } else {
       if (existing.being.zone !== being.zone) {
         triggerFilament(existing.being.zone, being.zone, "#60d9f6");
-        triggerRipple(being.zone, "#60d9f6", 0.9);
+        triggerRipple(being.zone, "#f6c46d", 1.0);
+        state.doorFlashes.set(`${existing.being.zone}:${being.zone}`, 1.0);
       }
-      existing.targetX = anchorX;
-      existing.targetY = anchorY;
+      const rNow = Number(being.rewards ?? 0);
+      const pNow = Number(being.punishments ?? 0);
+      if (rNow > existing.prevRewards) {
+        existing.rewardTimer = 3.2;
+        state.fxBursts.push({ wx: tx, wy: ty, wz: tz + 28, kind: "reward", life: 1.0 });
+        playHarmonicChime("reward");
+      }
+      if (pNow > existing.prevPunishments) {
+        existing.punishTimer = 2.8;
+        state.fxBursts.push({ wx: tx, wy: ty, wz: tz + 24, kind: "punish", life: 1.0 });
+      }
+      existing.prevRewards = rNow;
+      existing.prevPunishments = pNow;
+      existing.targetX = tx;
+      existing.targetY = ty;
+      existing.targetZ = tz;
       existing.being = being;
     }
   });
@@ -498,131 +706,759 @@ function syncBeingsAnimationState(beings) {
   }
 }
 
-function drawCurvedRiver(a, b, timeSec) {
-  const mx = (a.x + b.x) / 2;
-  const my = (a.y + b.y) / 2;
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
+function triggerRipple(zoneName, color = "#4fe3c1", strength = 1.0) {
+  const zc = getZoneCenter(zoneName);
+  state.ripples.push({
+    wx: zc.x,
+    wy: zc.y,
+    wz: zc.z,
+    r: zc.radius * 0.25,
+    maxR: zc.radius * (1.55 + strength * 0.55),
+    alpha: 0.85,
+    color,
+  });
+}
+
+function triggerFilament(fromZone, toZone, color = "#f6c46d") {
+  const a = getZoneCenter(fromZone);
+  const b = getZoneCenter(toZone);
+  if (a === b) return;
+  state.filaments.push({
+    x1: a.x,
+    y1: a.y,
+    z1: a.z + 18,
+    x2: b.x,
+    y2: b.y,
+    z2: b.z + 18,
+    progress: 0,
+    color,
+  });
+}
+
+function setCameraMode(mode) {
+  state.camera.mode = mode;
+  [camIsoBtn, camArenaBtn, camFollowBtn].forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.cam === mode);
+  });
+
+  if (mode === "iso") {
+    state.camera.targetTx = 0;
+    state.camera.targetTy = 75;
+    state.camera.targetTz = 18;
+    state.camera.targetYaw = -0.34;
+    state.camera.targetPitch = 0.72;
+    state.camera.targetZoom = state.canvasWidth <= 760 ? 0.76 : 0.92;
+  } else if (mode === "arena") {
+    const pg = resolvePlaygroundCoords();
+    state.camera.targetTx = pg.x;
+    state.camera.targetTy = pg.y;
+    state.camera.targetTz = pg.z + 8;
+    state.camera.targetPitch = 0.58;
+    state.camera.targetZoom = state.canvasWidth <= 760 ? 0.96 : 1.32;
+  } else if (mode === "follow") {
+    if (!state.selectedBeingId && state.universe?.beings?.length) {
+      selectBeing(state.universe.beings[0].id, { speak: false });
+    }
+    state.camera.targetZoom = state.canvasWidth <= 760 ? 1.08 : 1.42;
+  }
+}
+
+function drawOutlinedText(text, x, y, fillStyle, font) {
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.font = font;
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 3.4;
+  ctx.strokeStyle = "rgba(5, 8, 20, 0.9)";
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = fillStyle;
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// 3D Drawing Primitives: Lands, Homes, Paths, Doors, Playground & Embodied Beings
+// ---------------------------------------------------------------------------
+function draw3DLandPlatform(node, t) {
+  const zInfo = node.zone || {};
+  const breath = 1 + 0.024 * Math.sin(t * 1.1 + node.x * 0.01);
+  const rad = node.radius * breath;
+  const sides = 8;
+  const thickness = 18;
+
+  const topPts = [];
+  const botPts = [];
+  for (let i = 0; i < sides; i += 1) {
+    const a = (i / sides) * Math.PI * 2 + Math.PI / 8;
+    const vx = node.x + Math.cos(a) * rad;
+    const vy = node.y + Math.sin(a) * rad;
+    topPts.push(project3D(vx, vy, node.z));
+    botPts.push(project3D(vx, vy, node.z - thickness));
+  }
+
+  // Soft glow beneath island
+  const centerProj = project3D(node.x, node.y, node.z);
+  const glowR = rad * centerProj.scale * 1.4;
+  const halo = ctx.createRadialGradient(
+    centerProj.sx,
+    centerProj.sy,
+    glowR * 0.12,
+    centerProj.sx,
+    centerProj.sy,
+    glowR
+  );
+  halo.addColorStop(0, node.glow);
+  halo.addColorStop(1, "rgba(5, 8, 20, 0)");
+  ctx.beginPath();
+  ctx.arc(centerProj.sx, centerProj.sy, glowR, 0, Math.PI * 2);
+  ctx.fillStyle = halo;
+  ctx.fill();
+
+  // Extruded side faces (bottom bevel)
+  for (let i = 0; i < sides; i += 1) {
+    const next = (i + 1) % sides;
+    ctx.beginPath();
+    ctx.moveTo(topPts[i].sx, topPts[i].sy);
+    ctx.lineTo(topPts[next].sx, topPts[next].sy);
+    ctx.lineTo(botPts[next].sx, botPts[next].sy);
+    ctx.lineTo(botPts[i].sx, botPts[i].sy);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(11, 18, 40, 0.84)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // Top luminous terrace
+  ctx.beginPath();
+  topPts.forEach((p, idx) => (idx === 0 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy)));
+  ctx.closePath();
+  const topGrad = ctx.createLinearGradient(
+    centerProj.sx - glowR * 0.5,
+    centerProj.sy - glowR * 0.5,
+    centerProj.sx + glowR * 0.5,
+    centerProj.sy + glowR * 0.5
+  );
+  topGrad.addColorStop(0, "rgba(20, 32, 66, 0.92)");
+  topGrad.addColorStop(1, "rgba(10, 16, 36, 0.92)");
+  ctx.fillStyle = topGrad;
+  ctx.fill();
+
+  const calmness = Number(zInfo.calmness ?? 0.85);
+  ctx.strokeStyle = calmness < 0.5 ? "rgba(251, 138, 112, 0.55)" : node.hue;
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 1.8;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  // Inner concentric contour terrace ring
+  ctx.beginPath();
+  for (let i = 0; i < sides; i += 1) {
+    const a = (i / sides) * Math.PI * 2 + Math.PI / 8;
+    const p = project3D(node.x + Math.cos(a) * rad * 0.64, node.y + Math.sin(a) * rad * 0.64, node.z + 1);
+    if (i === 0) ctx.moveTo(p.sx, p.sy);
+    else ctx.lineTo(p.sx, p.sy);
+  }
+  ctx.closePath();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Floating label above island edge
+  const labelAnchor = project3D(node.x, node.y - rad * 0.94, node.z + 18);
+  const isPhone = state.canvasWidth <= 760;
+  drawOutlinedText(
+    node.label,
+    labelAnchor.sx,
+    labelAnchor.sy - 6,
+    "rgba(244, 247, 251, 0.94)",
+    `600 ${Math.max(10, Math.round(12.5 * labelAnchor.scale))}px "Inter", system-ui, sans-serif`
+  );
+  if (zInfo.mood && !isPhone) {
+    drawOutlinedText(
+      zInfo.mood,
+      labelAnchor.sx,
+      labelAnchor.sy + 9,
+      "rgba(182, 196, 224, 0.78)",
+      `400 ${Math.max(9, Math.round(10.5 * labelAnchor.scale))}px "Inter", system-ui, sans-serif`
+    );
+  }
+}
+
+function draw3DPath(fromNode, toNode, t, index = 0) {
+  const steps = 12;
+  const mx = (fromNode.x + toNode.x) * 0.5;
+  const my = (fromNode.y + toNode.y) * 0.5;
+  const dx = toNode.x - fromNode.x;
+  const dy = toNode.y - fromNode.y;
   const cx = mx - dy * 0.14;
   const cy = my + dx * 0.14;
+  const cz = (fromNode.z + toNode.z) * 0.5 + 4;
 
-  const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
-  grad.addColorStop(0, "rgba(79, 227, 193, 0.20)");
-  grad.addColorStop(0.5, "rgba(96, 217, 246, 0.34)");
-  grad.addColorStop(1, "rgba(167, 139, 250, 0.22)");
+  const points = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const u = i / steps;
+    const inv = 1 - u;
+    const wx = inv * inv * fromNode.x + 2 * inv * u * cx + u * u * toNode.x;
+    const wy = inv * inv * fromNode.y + 2 * inv * u * cy + u * u * toNode.y;
+    const wz = inv * inv * fromNode.z + 2 * inv * u * cz + u * u * toNode.z;
+    points.push({ wx, wy, wz, p: project3D(wx, wy, wz) });
+  }
 
   ctx.save();
   ctx.beginPath();
-  ctx.moveTo(a.x, a.y);
-  ctx.quadraticCurveTo(cx, cy, b.x, b.y);
-  ctx.strokeStyle = grad;
-  ctx.lineWidth = 2.2;
+  points.forEach((pt, idx) => (idx === 0 ? ctx.moveTo(pt.p.sx, pt.p.sy) : ctx.lineTo(pt.p.sx, pt.p.sy)));
+  ctx.strokeStyle = "rgba(96, 217, 246, 0.34)";
+  ctx.lineWidth = 3.2;
   ctx.stroke();
 
-  // Flowing bioluminescent motes along the river
-  for (let i = 0; i < 3; i += 1) {
-    const t = (timeSec * 0.14 + i / 3) % 1;
-    const inv = 1 - t;
-    const px = inv * inv * a.x + 2 * inv * t * cx + t * t * b.x;
-    const py = inv * inv * a.y + 2 * inv * t * cy + t * t * b.y;
+  // Stepping stones along the path
+  for (let i = 2; i < steps - 1; i += 2) {
+    const sp = points[i].p;
     ctx.beginPath();
-    ctx.arc(px, py, 2.6, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(190, 248, 255, 0.78)";
+    ctx.ellipse(sp.sx, sp.sy, 4.5 * sp.scale, 2.7 * sp.scale, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255, 223, 163, 0.38)";
+    ctx.fill();
+  }
+
+  // Flowing river motes
+  for (let m = 0; m < 2; m += 1) {
+    const u = (t * 0.16 + m * 0.5 + index * 0.21) % 1;
+    const inv = 1 - u;
+    const wx = inv * inv * fromNode.x + 2 * inv * u * cx + u * u * toNode.x;
+    const wy = inv * inv * fromNode.y + 2 * inv * u * cy + u * u * toNode.y;
+    const wz = inv * inv * fromNode.z + 2 * inv * u * cz + u * u * toNode.z + 2;
+    const mp = project3D(wx, wy, wz);
+    ctx.beginPath();
+    ctx.arc(mp.sx, mp.sy, 3 * mp.scale, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(190, 248, 255, 0.88)";
     ctx.fill();
   }
   ctx.restore();
 }
 
+function draw3DHome(home, coords, t) {
+  const base = project3D(coords.x, coords.y, coords.z);
+  const roof = project3D(coords.x, coords.y, coords.z + 28);
+  const s = base.scale;
+  const w = 18 * s;
+  const h = 15 * s;
+
+  ctx.save();
+  // Warm hearth ground glow
+  const glow = ctx.createRadialGradient(base.sx, base.sy, 2, base.sx, base.sy, 30 * s);
+  glow.addColorStop(0, "rgba(246, 196, 109, 0.36)");
+  glow.addColorStop(1, "rgba(246, 196, 109, 0)");
+  ctx.beginPath();
+  ctx.arc(base.sx, base.sy, 30 * s, 0, Math.PI * 2);
+  ctx.fillStyle = glow;
+  ctx.fill();
+
+  // Cottage body
+  ctx.beginPath();
+  ctx.roundRect(base.sx - w * 0.75, base.sy - h, w * 1.5, h, 4 * s);
+  ctx.fillStyle = "rgba(32, 42, 74, 0.94)";
+  ctx.strokeStyle = "rgba(246, 196, 109, 0.55)";
+  ctx.lineWidth = 1.3;
+  ctx.fill();
+  ctx.stroke();
+
+  // Warm glowing arched doorway
+  ctx.beginPath();
+  ctx.arc(base.sx, base.sy - 2 * s, 4.5 * s, Math.PI, 0);
+  ctx.lineTo(base.sx + 4.5 * s, base.sy);
+  ctx.lineTo(base.sx - 4.5 * s, base.sy);
+  ctx.closePath();
+  ctx.fillStyle = "#ffdfa3";
+  ctx.fill();
+
+  // Glowing domed roof
+  ctx.beginPath();
+  ctx.moveTo(base.sx - w * 0.95, base.sy - h + 1);
+  ctx.quadraticCurveTo(roof.sx, roof.sy - 6 * s, base.sx + w * 0.95, base.sy - h + 1);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(167, 139, 250, 0.78)";
+  ctx.strokeStyle = "rgba(255, 223, 163, 0.65)";
+  ctx.fill();
+  ctx.stroke();
+
+  // Floating hearth ember
+  const emberY = roof.sy - 6 * s - ((t * 14) % (12 * s));
+  ctx.beginPath();
+  ctx.arc(roof.sx + Math.sin(t * 2 + coords.x) * 2 * s, emberY, 1.8 * s, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255, 223, 163, 0.75)";
+  ctx.fill();
+
+  if ((home.name || home.label) && state.canvasWidth > 760) {
+    drawOutlinedText(
+      home.label || home.name,
+      base.sx,
+      base.sy + 13 * s,
+      "rgba(255, 223, 163, 0.86)",
+      `500 ${Math.max(9, Math.round(10 * s))}px "Inter", system-ui, sans-serif`
+    );
+  }
+  ctx.restore();
+
+  state.hitTargets.push({
+    sx: base.sx,
+    sy: base.sy - h * 0.5,
+    r: Math.max(18, 22 * s),
+    type: "home",
+    label: home.label || home.name || "Cozy Home",
+    story: home.story || "A warm sanctuary hearth where beings dream and renew.",
+  });
+}
+
+function draw3DDoor(door, coords, t) {
+  const base = project3D(coords.x, coords.y, coords.z);
+  const top = project3D(coords.x, coords.y, coords.z + 26);
+  const s = base.scale;
+  const guarded = String(door.state || "open").toLowerCase() === "guarded";
+  const zA = door.zone_a || door.from_zone || "";
+  const zB = door.zone_b || door.to_zone || "";
+  const flashKey = `${zA}:${zB}`;
+  const flashRev = `${zB}:${zA}`;
+  let flash = Math.max(state.doorFlashes.get(flashKey) || 0, state.doorFlashes.get(flashRev) || 0);
+  if (door.recent_flash) flash = Math.max(flash, 0.85);
+  if (state.doorFlashes.get(flashKey) > 0) state.doorFlashes.set(flashKey, Math.max(0, state.doorFlashes.get(flashKey) - 0.02));
+  if (state.doorFlashes.get(flashRev) > 0) state.doorFlashes.set(flashRev, Math.max(0, state.doorFlashes.get(flashRev) - 0.02));
+
+  const archColor = guarded ? "#fb8a70" : flash > 0.1 ? "#ffdfa3" : "#4fe3c1";
+  const archW = 11 * s;
+  const archH = Math.max(16 * s, base.sy - top.sy);
+
+  ctx.save();
+  // Portal inner shimmer
+  const portalGrad = ctx.createRadialGradient(base.sx, base.sy - archH * 0.5, 1, base.sx, base.sy - archH * 0.5, archW * 1.4);
+  portalGrad.addColorStop(0, guarded ? "rgba(251, 138, 112, 0.45)" : "rgba(79, 227, 193, 0.45)");
+  portalGrad.addColorStop(1, "rgba(5, 8, 20, 0)");
+  ctx.beginPath();
+  ctx.arc(base.sx, base.sy - archH * 0.5, archW * 1.4, 0, Math.PI * 2);
+  ctx.fillStyle = portalGrad;
+  ctx.fill();
+
+  // Luminous archway pillars & crown
+  ctx.beginPath();
+  ctx.moveTo(base.sx - archW, base.sy);
+  ctx.lineTo(base.sx - archW, base.sy - archH * 0.65);
+  ctx.arc(base.sx, base.sy - archH * 0.65, archW, Math.PI, 0);
+  ctx.lineTo(base.sx + archW, base.sy);
+  ctx.strokeStyle = archColor;
+  ctx.lineWidth = (2.6 + flash * 2) * Math.max(0.8, s);
+  ctx.shadowColor = archColor;
+  ctx.shadowBlur = 12 + flash * 14;
+  ctx.stroke();
+
+  if (guarded) {
+    // Soft protective lattice across guarded door
+    ctx.beginPath();
+    ctx.moveTo(base.sx - archW * 0.7, base.sy - archH * 0.35);
+    ctx.lineTo(base.sx + archW * 0.7, base.sy - archH * 0.55);
+    ctx.strokeStyle = "rgba(251, 138, 112, 0.75)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  state.hitTargets.push({
+    sx: base.sx,
+    sy: base.sy - archH * 0.5,
+    r: Math.max(16, 18 * s),
+    type: "door",
+    label: door.name || door.label || "Realm Doorway",
+    story: door.story || (guarded ? "A guarded doorway watching for safety." : "An open luminous archway welcoming travelers."),
+  });
+}
+
+function draw3DPlaygroundArena(pg, coords, t, compActive) {
+  const base = project3D(coords.x, coords.y, coords.z + 4);
+  const s = base.scale;
+  const rx = 44 * s;
+  const ry = 24 * s;
+
+  ctx.save();
+  // Stage outer aura
+  const stageGlow = ctx.createRadialGradient(base.sx, base.sy, rx * 0.2, base.sx, base.sy, rx * 1.4);
+  stageGlow.addColorStop(0, compActive ? "rgba(246, 196, 109, 0.42)" : "rgba(167, 139, 250, 0.28)");
+  stageGlow.addColorStop(1, "rgba(5, 8, 20, 0)");
+  ctx.beginPath();
+  ctx.arc(base.sx, base.sy, rx * 1.4, 0, Math.PI * 2);
+  ctx.fillStyle = stageGlow;
+  ctx.fill();
+
+  // Concentric 3D arena rings
+  [1.0, 0.72, 0.42].forEach((k, idx) => {
+    ctx.beginPath();
+    ctx.ellipse(base.sx, base.sy, rx * k, ry * k, 0, 0, Math.PI * 2);
+    ctx.fillStyle = idx === 0 ? "rgba(24, 22, 58, 0.78)" : "rgba(246, 196, 109, 0.12)";
+    ctx.fill();
+    ctx.strokeStyle = compActive ? "#f6c46d" : idx === 0 ? "#a78bfa" : "rgba(96, 217, 246, 0.45)";
+    ctx.lineWidth = idx === 0 ? 2 : 1.2;
+    ctx.stroke();
+  });
+
+  // 4 glowing arena beacons around rim
+  for (let i = 0; i < 4; i += 1) {
+    const a = t * (compActive ? 0.8 : 0.25) + (i * Math.PI) / 2;
+    const bx = base.sx + Math.cos(a) * rx;
+    const by = base.sy + Math.sin(a) * ry;
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.lineTo(bx, by - 16 * s);
+    ctx.strokeStyle = "rgba(255, 223, 163, 0.72)";
+    ctx.lineWidth = 2 * s;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(bx, by - 17 * s, 3 * s, 0, Math.PI * 2);
+    ctx.fillStyle = compActive ? "#ffdfa3" : "#60d9f6";
+    ctx.fill();
+  }
+
+  ctx.restore();
+  drawOutlinedText(
+    pg?.name || pg?.label || "Starlight Arena",
+    base.sx,
+    base.sy + ry + 13 * s,
+    "#ffdfa3",
+    `600 ${Math.max(10, Math.round(11.5 * s))}px "Inter", system-ui, sans-serif`
+  );
+
+  state.hitTargets.push({
+    sx: base.sx,
+    sy: base.sy,
+    r: Math.max(24, rx * 0.9),
+    type: "playground",
+    label: pg?.name || pg?.label || "Starlight Arena",
+    story: pg?.story || "A vibrant cosmic stage where organisms test skills, collaborate, and earn honor.",
+  });
+}
+
+function drawArticulatedBeing3D(anim, t) {
+  const being = anim.being;
+  const walkState = String(being.location?.walk_state || (String(being.mode || "").includes("SLEEP") ? "resting_home" : "walking_path"));
+  const isResting = walkState === "resting_home" || String(being.mode || "").includes("SLEEP");
+  const isCompeting = walkState === "competing_playground";
+  const isWorking = walkState === "crossing_door" || String(being.mode || "") === "DEEP_FOCUS";
+
+  const bobAmp = isResting ? 1.5 : isCompeting ? 5.5 : 3.2;
+  const bob = Math.sin(t * (isCompeting ? 5.2 : 2.3) + anim.phase) * bobAmp;
+  const proj = project3D(anim.wx, anim.wy, anim.wz + 12 + bob);
+  const footProj = project3D(anim.wx, anim.wy, anim.wz + 1);
+  const s = Math.max(0.55, proj.scale);
+
+  const pal = moodPalette(being);
+  const isSelected = state.selectedBeingId === being.id;
+  const isHovered = state.hoveredHit?.type === "being" && state.hoveredHit?.id === being.id;
+  const anatomy = being.anatomy || {};
+  const eyeStr = Number(anatomy.eyes?.strength ?? 0.75);
+  const earStr = Number(anatomy.ears?.strength ?? 0.7);
+  const tongueStr = Number(anatomy.tongue?.strength ?? 0.72);
+  const handStr = Number(anatomy.hands?.strength ?? 0.75);
+  const legStr = Number(anatomy.legs?.strength ?? 0.75);
+
+  const sx = proj.sx;
+  const sy = proj.sy;
+
+  ctx.save();
+
+  // Ground shadow
+  ctx.beginPath();
+  ctx.ellipse(footProj.sx, footProj.sy, 14 * s, 7 * s, 0, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(3, 5, 14, 0.55)";
+  ctx.fill();
+
+  // Mood / Selection / Punishment / Reward Aura
+  const auraR = (isSelected ? 40 : isHovered ? 35 : 29) * s;
+  const auraGrad = ctx.createRadialGradient(sx, sy - 6 * s, 3 * s, sx, sy - 6 * s, auraR);
+  auraGrad.addColorStop(0, pal.glow);
+  auraGrad.addColorStop(1, "rgba(5, 8, 20, 0)");
+  ctx.beginPath();
+  ctx.arc(sx, sy - 6 * s, auraR, 0, Math.PI * 2);
+  ctx.fillStyle = auraGrad;
+  ctx.fill();
+
+  if (isSelected || isHovered) {
+    ctx.beginPath();
+    ctx.ellipse(footProj.sx, footProj.sy, 22 * s, 11 * s, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = isSelected ? "#ffdfa3" : "rgba(255, 255, 255, 0.6)";
+    ctx.lineWidth = isSelected ? 2.2 : 1.4;
+    ctx.stroke();
+  }
+
+  // Brief crimson correction ring if punished recently
+  if (anim.punishTimer > 0) {
+    anim.punishTimer = Math.max(0, anim.punishTimer - 0.016);
+    ctx.beginPath();
+    ctx.ellipse(footProj.sx, footProj.sy, 24 * s, 12 * s, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(251, 138, 112, 0.85)";
+    ctx.lineWidth = 2.4;
+    ctx.stroke();
+  }
+
+  // 1. LEGS (striding along paths/doors or tucked at Home)
+  const stride = isResting ? 0 : Math.sin(t * (3.5 + legStr * 3.0) + anim.phase) * (5.5 + legStr * 3.5) * s;
+  const legLen = (isResting ? 5 : 10 + legStr * 3) * s;
+  ctx.strokeStyle = pal.secondary;
+  ctx.lineWidth = 2.6 * s;
+  ctx.lineCap = "round";
+  [-1, 1].forEach((side) => {
+    const hipX = sx + side * 4.5 * s;
+    const hipY = sy + 4 * s;
+    const footX = hipX + side * (isResting ? 3 * s : 1.5 * s) + (side === -1 ? stride : -stride) * 0.6;
+    const footY = hipY + legLen - (side === -1 ? Math.max(0, stride * 0.35) : Math.max(0, -stride * 0.35));
+    ctx.beginPath();
+    ctx.moveTo(hipX, hipY);
+    ctx.quadraticCurveTo(hipX + side * 2 * s, hipY + legLen * 0.5, footX, footY);
+    ctx.stroke();
+  });
+
+  // 2. HANDS / ARMS (gesturing, crafting sparks, or raising celebration ribbons)
+  const armWave = isCompeting || anim.rewardTimer > 0
+    ? -8 * s - Math.abs(Math.sin(t * 6 + anim.phase)) * 7 * s
+    : isWorking
+      ? Math.sin(t * 4.5 + anim.phase) * 5 * s
+      : Math.sin(t * 1.8 + anim.phase) * 2.5 * s;
+
+  [-1, 1].forEach((side) => {
+    const shX = sx + side * 10 * s;
+    const shY = sy - 3 * s;
+    const handX = shX + side * (8 + handStr * 4) * s;
+    const handY = shY + (isCompeting || anim.rewardTimer > 0 ? armWave : 3 * s + armWave * side);
+    ctx.beginPath();
+    ctx.moveTo(shX, shY);
+    ctx.lineTo(handX, handY);
+    ctx.strokeStyle = pal.primary;
+    ctx.lineWidth = 2.4 * s;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(handX, handY, (2.2 + handStr * 1.4) * s, 0, Math.PI * 2);
+    ctx.fillStyle = isWorking || isCompeting ? "#ffdfa3" : pal.secondary;
+    ctx.fill();
+  });
+
+  // 3. TORSO & HEAD CORE
+  const bodyR = 11.5 * s;
+  const torsoGrad = ctx.createRadialGradient(sx - 3 * s, sy - 6 * s, 2 * s, sx, sy - 3 * s, bodyR);
+  torsoGrad.addColorStop(0, "#ffffff");
+  torsoGrad.addColorStop(0.45, pal.primary);
+  torsoGrad.addColorStop(1, "rgba(12, 20, 46, 0.92)");
+  ctx.beginPath();
+  ctx.ellipse(sx, sy - 3 * s, bodyR, bodyR * 1.12, 0, 0, Math.PI * 2);
+  ctx.fillStyle = torsoGrad;
+  ctx.fill();
+
+  // Head dome
+  const headY = sy - 16 * s;
+  const headR = 8.2 * s;
+  ctx.beginPath();
+  ctx.arc(sx, headY, headR, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(18, 28, 58, 0.94)";
+  ctx.strokeStyle = pal.primary;
+  ctx.lineWidth = 1.6 * s;
+  ctx.fill();
+  ctx.stroke();
+
+  // 4. EARS (expressive listening antennae/ears + soft sound wave arcs)
+  const earTwitch = Math.sin(t * 2.4 + anim.phase) * 0.14;
+  [-1, 1].forEach((side) => {
+    const ex = sx + side * (headR * 0.9);
+    const ey = headY - 3 * s;
+    const tipX = ex + side * (4.5 + earStr * 3.5) * s;
+    const tipY = ey - (5 + earStr * 3) * s + earTwitch * 6 * s * side;
+    ctx.beginPath();
+    ctx.moveTo(ex, ey);
+    ctx.lineTo(tipX, tipY);
+    ctx.strokeStyle = "#60d9f6";
+    ctx.lineWidth = 2.1 * s;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(tipX, tipY, 2 * s, 0, Math.PI * 2);
+    ctx.fillStyle = "#c4b5fd";
+    ctx.fill();
+
+    if (earStr > 0.72 && Math.sin(t * 2.5 + anim.phase) > 0.55) {
+      ctx.beginPath();
+      ctx.arc(tipX, tipY, 5.5 * s, side === -1 ? Math.PI * 0.8 : -Math.PI * 0.4, side === -1 ? Math.PI * 1.4 : Math.PI * 0.3);
+      ctx.strokeStyle = "rgba(96, 217, 246, 0.45)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  });
+
+  // 5. EYES (blinking & looking toward active sparks or arena)
+  anim.blinkTimer -= 0.016;
+  if (anim.blinkTimer < -0.14) anim.blinkTimer = 2.4 + Math.random() * 3.2;
+  const blinking = anim.blinkTimer < 0;
+  const gazeX = Math.sin(t * 0.9 + anim.phase) * 1.1 * s;
+  const eyeR = (1.5 + eyeStr * 1.0) * s;
+  [-1, 1].forEach((side) => {
+    const ex = sx + side * 3.1 * s + gazeX;
+    const ey = headY - 1 * s;
+    if (blinking) {
+      ctx.beginPath();
+      ctx.moveTo(ex - eyeR, ey);
+      ctx.lineTo(ex + eyeR, ey);
+      ctx.strokeStyle = "#ffdfa3";
+      ctx.lineWidth = 1.4 * s;
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(ex, ey, eyeR, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffdfa3";
+      ctx.fill();
+    }
+  });
+
+  // 6. TONGUE / VOICE (expressive voice ripple when communicating or speaking)
+  const speakingNow = anim.speakTimer > 0 || (isSelected && whisperVoiceStateEl.textContent.includes("Speaking"));
+  if (anim.speakTimer > 0) anim.speakTimer = Math.max(0, anim.speakTimer - 0.016);
+  const mouthOpen = speakingNow || (tongueStr > 0.78 && Math.sin(t * 4.2 + anim.phase) > 0.65);
+  ctx.beginPath();
+  if (mouthOpen) {
+    ctx.ellipse(sx, headY + 3.4 * s, 2.3 * s, 1.8 * s, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "#fb8a70";
+    ctx.fill();
+    // Speech ripple ring
+    const spR = (8 + ((t * 18) % 14)) * s;
+    ctx.beginPath();
+    ctx.arc(sx, headY + 3 * s, spR, -Math.PI * 0.25, Math.PI * 0.25);
+    ctx.strokeStyle = "rgba(255, 223, 163, 0.55)";
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+  } else {
+    ctx.arc(sx, headY + 2.8 * s, 2.1 * s, 0.15 * Math.PI, 0.85 * Math.PI);
+    ctx.strokeStyle = "rgba(255, 223, 163, 0.85)";
+    ctx.lineWidth = 1.2 * s;
+    ctx.stroke();
+  }
+
+  // Reward golden halo / rising stars
+  if (anim.rewardTimer > 0) {
+    anim.rewardTimer = Math.max(0, anim.rewardTimer - 0.016);
+    ctx.beginPath();
+    ctx.ellipse(sx, headY - 12 * s, 10 * s, 3.6 * s, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = "#ffdfa3";
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+  }
+
+  // 5 tiny orbiting vital-organ lights around waist
+  const organs = being.organs || [];
+  for (let o = 0; o < 5; o += 1) {
+    const org = organs[o];
+    const vit = Number(org?.vitality ?? 0.85);
+    const oa = t * 0.85 + anim.phase + (o * Math.PI * 2) / 5;
+    const ox = sx + Math.cos(oa) * 16 * s;
+    const oy = sy - 3 * s + Math.sin(oa) * 6 * s;
+    ctx.beginPath();
+    ctx.arc(ox, oy, (1.6 + vit * 1.2) * s, 0, Math.PI * 2);
+    ctx.fillStyle = vit > 0.7 ? pal.secondary : "#fb8a70";
+    ctx.fill();
+  }
+
+  // Name & subtle honor glint
+  const honor = Number(being.honor ?? 0);
+  const label = honor > 0 ? `${being.name || being.id} ★${honor}` : (being.name || being.id);
+  drawOutlinedText(
+    label,
+    sx,
+    footProj.sy + 17 * s,
+    isSelected ? "#ffdfa3" : "rgba(244, 247, 251, 0.94)",
+    `${isSelected ? "600" : "500"} ${Math.max(9.5, Math.round(11.5 * s))}px "Inter", system-ui, sans-serif`
+  );
+
+  ctx.restore();
+
+  state.hitTargets.push({
+    sx,
+    sy: sy - 6 * s,
+    r: Math.max(22, 26 * s),
+    type: "being",
+    id: being.id,
+    label: being.name || being.id,
+    story: `${being.name} — ${being.mood_phrase || "quietly present"}`,
+    depth: proj.depth,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 60fps Render Loop
+// ---------------------------------------------------------------------------
 function renderFrame(nowMs) {
   const t = nowMs * 0.001;
   const w = state.canvasWidth;
   const h = state.canvasHeight;
   ctx.clearRect(0, 0, w, h);
 
-  // Subtle ambient drifting starlight dust
+  // Smoothly lerp camera toward target (including Follow Being)
+  const cam = state.camera;
+  if (cam.mode === "follow" && state.selectedBeingId) {
+    const anim = state.beingsAnim.get(state.selectedBeingId);
+    if (anim) {
+      cam.targetTx = anim.wx;
+      cam.targetTy = anim.wy;
+      cam.targetTz = anim.wz + 8;
+    }
+  }
+  cam.tx += (cam.targetTx - cam.tx) * 0.08;
+  cam.ty += (cam.targetTy - cam.ty) * 0.08;
+  cam.tz += (cam.targetTz - cam.tz) * 0.08;
+  cam.yaw += (cam.targetYaw - cam.yaw) * 0.1;
+  cam.pitch += (cam.targetPitch - cam.pitch) * 0.1;
+  cam.zoom += (cam.targetZoom - cam.zoom) * 0.1;
+
+  // Starfield dust
   for (const s of state.stars) {
-    const twinkle = 0.25 + 0.55 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase));
+    const twinkle = 0.24 + 0.55 * (0.5 + 0.5 * Math.sin(t * s.speed + s.phase));
     ctx.beginPath();
     ctx.arc(s.x * w, s.y * h, s.r, 0, Math.PI * 2);
     ctx.fillStyle = `rgba(218, 232, 255, ${twinkle.toFixed(3)})`;
     ctx.fill();
   }
 
-  // Flowing Rivers of Light between neighboring zones
-  const drawnEdges = new Set();
-  for (const [zName, pos] of state.zonePositions.entries()) {
-    const neighbors = pos.zone?.neighbors || [];
-    for (const nb of neighbors) {
-      const nbPos = state.zonePositions.get(nb);
-      if (!nbPos) continue;
-      const edgeKey = [zName, nb].sort().join("--");
-      if (drawnEdges.has(edgeKey)) continue;
-      drawnEdges.add(edgeKey);
-      drawCurvedRiver(pos, nbPos, t);
+  state.hitTargets = [];
+
+  // 1. Paths connecting neighboring lands (drawn below platforms/actors)
+  const paths = state.universe?.world?.paths || [];
+  if (paths.length) {
+    paths.forEach((p, idx) => {
+      const a = getZoneCenter(p.from_zone || p.from);
+      const b = getZoneCenter(p.to_zone || p.to);
+      draw3DPath(a, b, t, idx);
+    });
+  } else {
+    const drawnEdges = new Set();
+    for (const [zName, node] of state.zoneNodes.entries()) {
+      for (const nb of node.zone?.neighbors || []) {
+        const nbNode = state.zoneNodes.get(nb);
+        if (!nbNode) continue;
+        const key = [zName, nb].sort().join("--");
+        if (drawnEdges.has(key)) continue;
+        drawnEdges.add(key);
+        draw3DPath(node, nbNode, t, drawnEdges.size);
+      }
     }
   }
 
-  // Breathing Bioluminescent Habitat Zones
-  for (const [, pos] of state.zonePositions.entries()) {
-    const zone = pos.zone || {};
-    const breath = 1 + 0.038 * Math.sin(t * 1.1 + pos.x * 0.01);
-    const radius = pos.r * breath;
-    const calmness = Number(zone.calmness ?? 0.85);
+  // 2. 3D Land Platforms sorted back-to-front by projected depth
+  const sortedZones = [...state.zoneNodes.values()]
+    .map((node) => ({ node, p: project3D(node.x, node.y, node.z) }))
+    .sort((a, b) => a.p.depth - b.p.depth);
+  sortedZones.forEach(({ node }) => draw3DLandPlatform(node, t));
 
-    const outerGrad = ctx.createRadialGradient(pos.x, pos.y, radius * 0.15, pos.x, pos.y, radius * 1.38);
-    outerGrad.addColorStop(0, pos.glow);
-    outerGrad.addColorStop(0.65, "rgba(16, 26, 56, 0.20)");
-    outerGrad.addColorStop(1, "rgba(5, 8, 20, 0)");
-
-    ctx.beginPath();
-    ctx.arc(pos.x, pos.y, radius * 1.38, 0, Math.PI * 2);
-    ctx.fillStyle = outerGrad;
-    ctx.fill();
-
-    // Soft membrane ring
-    ctx.beginPath();
-    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-    ctx.strokeStyle = calmness < 0.5 ? "rgba(251, 138, 112, 0.34)" : "rgba(255, 255, 255, 0.12)";
-    ctx.lineWidth = 1.4;
-    ctx.stroke();
-
-    // Zone poetic label
-    ctx.save();
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(244, 247, 251, 0.86)";
-    ctx.font = '600 13px "Inter", system-ui, sans-serif';
-    ctx.fillText(pos.label, pos.x, pos.y - radius - 14);
-    if (zone.mood) {
-      ctx.fillStyle = "rgba(182, 196, 224, 0.65)";
-      ctx.font = '400 11px "Inter", system-ui, sans-serif';
-      ctx.fillText(zone.mood, pos.x, pos.y - radius + 1);
-    }
-    ctx.restore();
-  }
-
-  // World entities floating gently inside their zones (subtle embers/sparks)
-  const entities = state.universe?.world?.entities || [];
-  entities.slice(0, 24).forEach((ent, idx) => {
-    const zPos = state.zonePositions.get(ent.zone);
-    if (!zPos) return;
-    const angle = t * 0.25 + idx * 1.3;
-    const dist = zPos.r * (0.62 + (idx % 3) * 0.12);
-    const ex = zPos.x + Math.cos(angle) * dist;
-    const ey = zPos.y + Math.sin(angle) * dist;
-    const resolved = String(ent.state || "").toLowerCase() === "resolved";
-    ctx.beginPath();
-    ctx.arc(ex, ey, resolved ? 2.8 : 4.1, 0, Math.PI * 2);
-    ctx.fillStyle = resolved ? "rgba(79, 227, 193, 0.45)" : "rgba(246, 196, 109, 0.78)";
-    ctx.fill();
-  });
-
-  // Expanding ripple waves
+  // 3. Expanding 3D Ripples on lands
   for (let i = state.ripples.length - 1; i >= 0; i -= 1) {
     const rp = state.ripples[i];
-    rp.r += 1.45;
-    rp.alpha *= 0.972;
+    rp.r += 1.4;
+    rp.alpha *= 0.968;
+    const p = project3D(rp.wx, rp.wy, rp.wz + 2);
     ctx.beginPath();
-    ctx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2);
+    ctx.ellipse(p.sx, p.sy, rp.r * p.scale, rp.r * p.scale * 0.56, 0, 0, Math.PI * 2);
     ctx.strokeStyle = rp.color;
     ctx.globalAlpha = Math.max(0, rp.alpha);
     ctx.lineWidth = 2;
@@ -631,16 +1467,92 @@ function renderFrame(nowMs) {
     if (rp.r >= rp.maxR || rp.alpha <= 0.02) state.ripples.splice(i, 1);
   }
 
-  // Synaptic light filaments arcing across zones
+  // 4. Depth-sorted 3D Objects: Homes, Doors, Playground Arena, Sparks & Embodied Beings
+  const renderQueue = [];
+
+  const homes = state.universe?.world?.homes || [];
+  homes.forEach((home, idx) => {
+    const coords = resolvePlaceWorldCoords(home, home.zone || "alpha-sector", idx);
+    const d = project3D(coords.x, coords.y, coords.z).depth;
+    renderQueue.push({ depth: d, draw: () => draw3DHome(home, coords, t) });
+  });
+
+  const doors = state.universe?.world?.doors || [];
+  doors.forEach((door, idx) => {
+    let coords;
+    const za = door.zone_a || door.from_zone;
+    const zb = door.zone_b || door.to_zone;
+    if (za && zb) {
+      const a = getZoneCenter(za);
+      const b = getZoneCenter(zb);
+      coords = { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5, z: (a.z + b.z) * 0.5 + 4 };
+    } else {
+      coords = resolvePlaceWorldCoords(door, door.zone || "hub", idx);
+    }
+    const d = project3D(coords.x, coords.y, coords.z).depth;
+    renderQueue.push({ depth: d, draw: () => draw3DDoor(door, coords, t) });
+  });
+
+  const playgrounds = state.universe?.world?.playgrounds || [];
+  const comp = state.universe?.world?.competition;
+  const compActive = Boolean(comp && (comp.active || comp.status === "active"));
+  if (playgrounds.length) {
+    playgrounds.forEach((pg, idx) => {
+      const coords = resolvePlaceWorldCoords(pg, pg.zone || "frontier", idx);
+      const d = project3D(coords.x, coords.y, coords.z).depth;
+      renderQueue.push({ depth: d, draw: () => draw3DPlaygroundArena(pg, coords, t, compActive) });
+    });
+  } else if (state.zoneNodes.has("frontier")) {
+    const coords = resolvePlaygroundCoords();
+    const d = project3D(coords.x, coords.y, coords.z).depth;
+    renderQueue.push({ depth: d, draw: () => draw3DPlaygroundArena(null, coords, t, compActive) });
+  }
+
+  // World entities (floating glowing sparks inside lands)
+  const entities = state.universe?.world?.entities || [];
+  entities.slice(0, 24).forEach((ent, idx) => {
+    const zc = getZoneCenter(ent.zone);
+    const angle = t * 0.32 + idx * 1.4;
+    const wx = zc.x + Math.cos(angle) * (zc.radius * 0.58);
+    const wy = zc.y + Math.sin(angle) * (zc.radius * 0.58);
+    const wz = zc.z + 18 + Math.sin(t * 2 + idx) * 4;
+    const p = project3D(wx, wy, wz);
+    const resolved = String(ent.state || "").toLowerCase() === "resolved";
+    renderQueue.push({
+      depth: p.depth,
+      draw: () => {
+        ctx.beginPath();
+        ctx.arc(p.sx, p.sy, (resolved ? 2.6 : 4.2) * p.scale, 0, Math.PI * 2);
+        ctx.fillStyle = resolved ? "rgba(79, 227, 193, 0.48)" : "rgba(246, 196, 109, 0.85)";
+        ctx.fill();
+      },
+    });
+  });
+
+  // Embodied Beings
+  for (const [, anim] of state.beingsAnim.entries()) {
+    anim.wx += (anim.targetX - anim.wx) * 0.05;
+    anim.wy += (anim.targetY - anim.wy) * 0.05;
+    anim.wz += (anim.targetZ - anim.wz) * 0.05;
+    const d = project3D(anim.wx, anim.wy, anim.wz + 10).depth;
+    renderQueue.push({ depth: d, draw: () => drawArticulatedBeing3D(anim, t) });
+  }
+
+  renderQueue.sort((a, b) => a.depth - b.depth);
+  renderQueue.forEach((item) => item.draw());
+
+  // 5. Synaptic filaments & Reward/Punishment bursts
   for (let i = state.filaments.length - 1; i >= 0; i -= 1) {
     const fl = state.filaments[i];
     fl.progress += 0.024;
-    const p = Math.min(1, fl.progress);
-    const px = fl.x1 + (fl.x2 - fl.x1) * p;
-    const py = fl.y1 + (fl.y2 - fl.y1) * p - Math.sin(p * Math.PI) * 42;
+    const u = Math.min(1, fl.progress);
+    const wx = fl.x1 + (fl.x2 - fl.x1) * u;
+    const wy = fl.y1 + (fl.y2 - fl.y1) * u;
+    const wz = fl.z1 + (fl.z2 - fl.z1) * u + Math.sin(u * Math.PI) * 58;
+    const p = project3D(wx, wy, wz);
     ctx.save();
     ctx.beginPath();
-    ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+    ctx.arc(p.sx, p.sy, 4.8 * p.scale, 0, Math.PI * 2);
     ctx.fillStyle = fl.color;
     ctx.shadowColor = fl.color;
     ctx.shadowBlur = 14;
@@ -649,136 +1561,106 @@ function renderFrame(nowMs) {
     if (fl.progress >= 1.05) state.filaments.splice(i, 1);
   }
 
-  // Living Multi-Ring Organisms (Beings)
-  for (const [, anim] of state.beingsAnim.entries()) {
-    anim.x += (anim.targetX - anim.x) * 0.045;
-    anim.y += (anim.targetY - anim.y) * 0.045;
-
-    const driftX = anim.x + Math.cos(t * 0.8 + anim.phase) * 7;
-    const driftY = anim.y + Math.sin(t * 1.05 + anim.phase) * 7;
-    anim.renderX = driftX;
-    anim.renderY = driftY;
-
-    const palette = moodPalette(anim.being);
-    const isSelected = state.selectedBeingId === anim.being.id;
-    const isHovered = state.hoveredBeingId === anim.being.id;
-    const pulse = 1 + 0.09 * Math.sin(t * palette.cadence + anim.phase);
-    const coreR = (isSelected ? 15 : 12.5) * pulse;
-
-    // Outer mood aura
-    const auraR = (isSelected ? 48 : isHovered ? 40 : 34) * pulse;
-    const auraGrad = ctx.createRadialGradient(driftX, driftY, coreR * 0.4, driftX, driftY, auraR);
-    auraGrad.addColorStop(0, palette.glow);
-    auraGrad.addColorStop(1, "rgba(5, 8, 20, 0)");
-    ctx.beginPath();
-    ctx.arc(driftX, driftY, auraR, 0, Math.PI * 2);
-    ctx.fillStyle = auraGrad;
-    ctx.fill();
-
-    // Selection or Hover Halo Ring
-    if (isSelected || isHovered) {
-      ctx.beginPath();
-      ctx.arc(driftX, driftY, 32 * pulse, 0, Math.PI * 2);
-      ctx.strokeStyle = isSelected ? "rgba(255, 223, 163, 0.85)" : "rgba(255, 255, 255, 0.45)";
-      ctx.lineWidth = isSelected ? 2 : 1.2;
-      ctx.stroke();
-    }
-
-    // 5 Orbiting Inner Lights (5 Vital Organs)
-    const organs = anim.being.organs || [];
-    const organCount = 5;
-    for (let o = 0; o < organCount; o += 1) {
-      const organ = organs[o];
-      const vitality = Number(organ?.vitality ?? organ?.health ?? 0.85);
-      const orbitAngle = t * (0.7 + o * 0.07) + anim.phase + (o * Math.PI * 2) / organCount;
-      const orbitR = 22.5;
-      const ox = driftX + Math.cos(orbitAngle) * orbitR;
-      const oy = driftY + Math.sin(orbitAngle) * orbitR;
-      ctx.beginPath();
-      ctx.arc(ox, oy, 2.2 + vitality * 1.8, 0, Math.PI * 2);
-      ctx.fillStyle = vitality > 0.7 ? palette.secondary : "#fb8a70";
-      ctx.fill();
-    }
-
-    // Inner luminous core
-    const coreGrad = ctx.createRadialGradient(driftX - 3, driftY - 3, 2, driftX, driftY, coreR);
-    coreGrad.addColorStop(0, "#ffffff");
-    coreGrad.addColorStop(0.45, palette.primary);
-    coreGrad.addColorStop(1, "rgba(10, 16, 36, 0.8)");
-    ctx.beginPath();
-    ctx.arc(driftX, driftY, coreR, 0, Math.PI * 2);
-    ctx.fillStyle = coreGrad;
-    ctx.fill();
-
-    // Gentle Name Label
+  for (let i = state.fxBursts.length - 1; i >= 0; i -= 1) {
+    const fb = state.fxBursts[i];
+    fb.life -= 0.016;
+    fb.wz += 0.6;
+    const p = project3D(fb.wx, fb.wy, fb.wz);
     ctx.save();
+    ctx.globalAlpha = Math.max(0, fb.life);
+    ctx.fillStyle = fb.kind === "reward" ? "#ffdfa3" : "#fb8a70";
+    ctx.font = `600 ${Math.round(14 * p.scale)}px "Inter", system-ui, sans-serif`;
     ctx.textAlign = "center";
-    ctx.fillStyle = isSelected ? "#ffdfa3" : "rgba(244, 247, 251, 0.9)";
-    ctx.font = `${isSelected ? "600" : "500"} 12px "Inter", system-ui, sans-serif`;
-    ctx.fillText(anim.being.name || anim.being.id, driftX, driftY + 38);
+    ctx.fillText(fb.kind === "reward" ? "★ Honor" : "✦ Gentle Check", p.sx, p.sy);
     ctx.restore();
+    if (fb.life <= 0) state.fxBursts.splice(i, 1);
   }
 
   requestAnimationFrame(renderFrame);
 }
 
-// Canvas Pointer Interaction
-function findBeingAt(clientX, clientY) {
-  let closest = null;
-  let minDist = 36;
-  for (const [, anim] of state.beingsAnim.entries()) {
-    const dx = clientX - (anim.renderX ?? anim.x);
-    const dy = clientY - (anim.renderY ?? anim.y);
-    const d = Math.hypot(dx, dy);
-    if (d < minDist) {
-      minDist = d;
-      closest = anim;
+// ---------------------------------------------------------------------------
+// Canvas Pointer Orbit / Drag / Zoom & Hit Detection
+// ---------------------------------------------------------------------------
+function findHitAt(clientX, clientY) {
+  let best = null;
+  let bestScore = Infinity;
+  for (const hit of state.hitTargets) {
+    const d = Math.hypot(clientX - hit.sx, clientY - hit.sy);
+    if (d <= hit.r) {
+      const priority = hit.type === "being" ? d * 0.6 : d + 8;
+      if (priority < bestScore) {
+        bestScore = priority;
+        best = hit;
+      }
     }
   }
-  return closest;
+  return best;
 }
 
-function findZoneAt(clientX, clientY) {
-  for (const [, pos] of state.zonePositions.entries()) {
-    const d = Math.hypot(clientX - pos.x, clientY - pos.y);
-    if (d <= pos.r * 0.95) return pos;
-  }
-  return null;
-}
+canvas.addEventListener("pointerdown", (ev) => {
+  state.camera.dragging = true;
+  state.camera.dragMoved = false;
+  state.camera.lastPointerX = ev.clientX;
+  state.camera.lastPointerY = ev.clientY;
+});
 
-canvas.addEventListener("mousemove", (ev) => {
-  const hit = findBeingAt(ev.clientX, ev.clientY);
-  if (hit) {
-    state.hoveredBeingId = hit.being.id;
-    canvas.style.cursor = "pointer";
-    tooltipEl.textContent = `${hit.being.name} — ${hit.being.mood_phrase || "quietly present"}`;
-    tooltipEl.style.left = `${ev.clientX}px`;
-    tooltipEl.style.top = `${ev.clientY}px`;
-    tooltipEl.classList.remove("hidden");
+window.addEventListener("pointermove", (ev) => {
+  if (state.camera.dragging) {
+    const dx = ev.clientX - state.camera.lastPointerX;
+    const dy = ev.clientY - state.camera.lastPointerY;
+    if (Math.hypot(dx, dy) > 3) state.camera.dragMoved = true;
+    state.camera.lastPointerX = ev.clientX;
+    state.camera.lastPointerY = ev.clientY;
+    state.camera.targetYaw -= dx * 0.0065;
+    state.camera.targetPitch = Math.max(0.28, Math.min(1.22, state.camera.targetPitch + dy * 0.0055));
+    tooltipEl.classList.add("hidden");
     return;
   }
-  state.hoveredBeingId = null;
-  canvas.style.cursor = "default";
-  const zoneHit = findZoneAt(ev.clientX, ev.clientY);
-  if (zoneHit?.zone) {
-    tooltipEl.textContent = zoneHit.zone.story || `${zoneHit.label} — ${zoneHit.zone.mood || "peaceful"}`;
-    tooltipEl.style.left = `${ev.clientX}px`;
-    tooltipEl.style.top = `${ev.clientY}px`;
+
+  if (ev.target !== canvas) {
+    state.hoveredHit = null;
+    tooltipEl.classList.add("hidden");
+    return;
+  }
+
+  const hit = findHitAt(ev.clientX, ev.clientY);
+  state.hoveredHit = hit;
+  if (hit) {
+    canvas.style.cursor = hit.type === "being" ? "pointer" : "grab";
+    tooltipEl.textContent = hit.story || hit.label;
+    tooltipEl.style.left = `${Math.max(90, Math.min(window.innerWidth - 90, ev.clientX))}px`;
+    tooltipEl.style.top = `${Math.max(70, ev.clientY)}px`;
     tooltipEl.classList.remove("hidden");
   } else {
+    canvas.style.cursor = "grab";
     tooltipEl.classList.add("hidden");
   }
 });
 
-canvas.addEventListener("click", (ev) => {
-  const hit = findBeingAt(ev.clientX, ev.clientY);
-  if (hit) {
-    selectBeing(hit.being.id, { speak: true });
+window.addEventListener("pointerup", (ev) => {
+  const wasDrag = state.camera.dragMoved;
+  state.camera.dragging = false;
+  if (!wasDrag && ev.target === canvas) {
+    const hit = findHitAt(ev.clientX, ev.clientY);
+    if (hit?.type === "being") {
+      selectBeing(hit.id, { speak: true });
+    }
   }
 });
 
+canvas.addEventListener(
+  "wheel",
+  (ev) => {
+    ev.preventDefault();
+    const delta = ev.deltaY > 0 ? -0.08 : 0.08;
+    state.camera.targetZoom = Math.max(0.5, Math.min(2.2, state.camera.targetZoom + delta));
+  },
+  { passive: false }
+);
+
 // ---------------------------------------------------------------------------
-// UI Rendering: Narrative, Beings Strip, Host Vitality, Drawer & Tapestry
+// UI Rendering: Narrative, Beings Strip, Vitality, Anatomy & Tapestry
 // ---------------------------------------------------------------------------
 function renderBeingsStrip(beings) {
   clearEl(beingsStripEl);
@@ -869,7 +1751,6 @@ function renderCharacterConstellation(character) {
 
   const ns = "http://www.w3.org/2000/svg";
 
-  // Concentric guide rings
   [0.45, 0.75, 1.0].forEach((scale) => {
     const ring = document.createElementNS(ns, "circle");
     ring.setAttribute("cx", cx);
@@ -880,7 +1761,6 @@ function renderCharacterConstellation(character) {
     constellationSvg.appendChild(ring);
   });
 
-  // Axes & Star points
   const pts = [];
   axes.forEach((ax) => {
     const val = Math.max(0.1, Math.min(1, c[ax.key]));
@@ -936,6 +1816,73 @@ function renderCharacterConstellation(character) {
   });
 }
 
+function renderAnatomySection(being, rwData) {
+  const anatomy = rwData?.anatomy || being.anatomy || {};
+  const homeLabel = being.home?.name || being.home?.label || (typeof being.home === "string" ? prettifyPhrase(being.home) : `${prettifyZone(being.zone)} Hearth`);
+  const walkPhrase = prettifyPhrase(being.location?.walk_state || "exploring");
+  drawerLifePlaceEl.textContent = being.action_story
+    ? `${being.action_story} Home: ${homeLabel}.`
+    : `Home: ${homeLabel} · Currently ${walkPhrase.toLowerCase()} in ${prettifyZone(being.zone)}.`;
+
+  clearEl(drawerAnatomyListEl);
+  const parts = [
+    { key: "eyes", title: "Eyes", fallback: "Observant eyes watching the horizon." },
+    { key: "ears", title: "Ears", fallback: "Attentive ears listening for soft signals." },
+    { key: "tongue", title: "Tongue & Voice", fallback: "Gentle voice sharing clarity with peers." },
+    { key: "hands", title: "Hands", fallback: "Steady hands crafting sparks and repairs." },
+    { key: "legs", title: "Legs", fallback: "Sure-footed legs walking paths and doorways." },
+  ];
+
+  parts.forEach((p) => {
+    const info = anatomy[p.key] || {};
+    const str = Math.max(0.1, Math.min(1, Number(info.strength ?? 0.72)));
+    const row = document.createElement("div");
+    row.className = "anatomy-row";
+
+    const head = document.createElement("div");
+    head.className = "anatomy-row-head";
+    const nameEl = document.createElement("span");
+    nameEl.textContent = p.title;
+    const valEl = document.createElement("span");
+    valEl.className = "anatomy-strength";
+    valEl.textContent = `${Math.round(str * 100)}%`;
+    head.append(nameEl, valEl);
+
+    const story = document.createElement("p");
+    story.className = "anatomy-story";
+    story.textContent = info.role_story || info.story || p.fallback;
+
+    const track = document.createElement("div");
+    track.className = "confidence-glow-track";
+    const fill = document.createElement("div");
+    fill.className = "confidence-glow-fill";
+    fill.style.width = `${Math.round(str * 100)}%`;
+    track.appendChild(fill);
+
+    row.append(head, story, track);
+    drawerAnatomyListEl.appendChild(row);
+  });
+
+  clearEl(drawerHonorLedgerEl);
+  const honor = Number(being.honor ?? 0);
+  const rewards = Number(being.rewards ?? 0);
+  const punishments = Number(being.punishments ?? 0);
+
+  const honorChip = document.createElement("span");
+  honorChip.className = "honor-chip is-gold";
+  honorChip.textContent = `Honor · ${honor}`;
+
+  const rewardChip = document.createElement("span");
+  rewardChip.className = "honor-chip is-gold";
+  rewardChip.textContent = `Rewards · ${rewards}`;
+
+  const penChip = document.createElement("span");
+  penChip.className = punishments > 0 ? "honor-chip is-coral" : "honor-chip";
+  penChip.textContent = punishments > 0 ? `Gentle Corrections · ${punishments}` : "Clear Standing";
+
+  drawerHonorLedgerEl.append(honorChip, rewardChip, penChip);
+}
+
 function renderBeingDrawer() {
   const beings = state.universe?.beings || [];
   const being = beings.find((b) => b.id === state.selectedBeingId);
@@ -961,7 +1908,10 @@ function renderBeingDrawer() {
   const activeBeliefs = rwData?.beliefs || being.beliefs || [];
 
   const karmaVal = activeSoul.karma ?? 1.0;
-  drawerKarmaPillEl.textContent = `Karma Radiance · ${Number(karmaVal).toFixed(1)}`;
+  const honorVal = being.honor ?? 0;
+  drawerKarmaPillEl.textContent = `Honor ${honorVal} · Karma ${Number(karmaVal).toFixed(1)}`;
+
+  renderAnatomySection(being, rwData);
 
   const callingRaw = String(activeSoul.calling || "steward").replace(/_/g, " ").trim();
   const callingSentence = callingRaw.includes(" ")
@@ -983,7 +1933,6 @@ function renderBeingDrawer() {
 
   renderCharacterConstellation(activeChar);
 
-  // Five Inner Organs
   const fuelPct = being.fuel_pct != null ? Math.round(Number(being.fuel_pct)) : 90;
   drawerVitalityWhisperEl.textContent = being.memory_mb != null
     ? `Vital reserve at ${fuelPct}% · Vessel memory aura ${Number(being.memory_mb).toFixed(0)} MB`
@@ -1022,7 +1971,6 @@ function renderBeingDrawer() {
     drawerOrgansEl.appendChild(petal);
   });
 
-  // Beliefs
   clearEl(drawerBeliefsEl);
   if (!activeBeliefs.length) {
     const empty = document.createElement("p");
@@ -1048,7 +1996,6 @@ function renderBeingDrawer() {
     });
   }
 
-  // Relative World
   clearEl(drawerObservablesEl);
   const bw = rwData?.body_world || rwData;
   if (bw) {
@@ -1160,6 +2107,18 @@ function updateZoneDropdown(zones) {
   }
 }
 
+function renderCompetitionBanner(world) {
+  const comp = world?.competition;
+  if (comp && (comp.active || comp.status === "active")) {
+    competitionBannerEl.classList.remove("hidden");
+    const leaders = (comp.leaderboard || []).slice(0, 2).map((l) => l.name).filter(Boolean);
+    const leaderTxt = leaders.length ? ` · Leading: ${leaders.join(", ")}` : "";
+    competitionTextEl.textContent = `${comp.title || "Starlight Harmony Trial"}${leaderTxt}`;
+  } else {
+    competitionBannerEl.classList.add("hidden");
+  }
+}
+
 // ---------------------------------------------------------------------------
 // API Synchronization
 // ---------------------------------------------------------------------------
@@ -1181,13 +2140,12 @@ async function selectBeing(beingId, { speak = false } = {}) {
   state.selectedBeingId = beingId;
   state.selectedBeingWorld = null;
   sanctuaryHudEl?.classList.add("drawer-open");
-  computeZonePositions();
-  syncBeingsAnimationState(state.universe?.beings || []);
   playHarmonicChime("select");
 
-  const being = (state.universe?.beings || []).find((b) => b.id === beingId);
-  if (being) {
-    triggerRipple(being.zone || "hub", "#f6c46d", 0.9);
+  const anim = state.beingsAnim.get(beingId);
+  if (anim) {
+    anim.speakTimer = 2.4;
+    triggerRipple(anim.being.zone || "hub", "#f6c46d", 0.9);
   }
   renderBeingsStrip(state.universe?.beings || []);
   renderBeingDrawer();
@@ -1206,7 +2164,7 @@ async function refreshUniverse() {
     const firstLoad = !state.universe;
     state.universe = data;
 
-    computeZonePositions();
+    syncZoneNodes();
     if (firstLoad) {
       updateZoneDropdown(data.world?.zones || []);
     }
@@ -1228,7 +2186,6 @@ async function refreshUniverse() {
       }
     }
 
-    // Visual ripples when new live events or ticks happen
     const events = data.chronicle?.events || [];
     events.forEach((ev) => {
       const eid = ev.id || `${ev.tick}:${ev.who}:${ev.where}`;
@@ -1247,6 +2204,7 @@ async function refreshUniverse() {
     syncBeingsAnimationState(beings);
     renderBeingsStrip(beings);
     renderHostVitality(data.machine);
+    renderCompetitionBanner(data.world);
     renderTapestry();
 
     if (state.selectedBeingId) {
@@ -1254,17 +2212,32 @@ async function refreshUniverse() {
       fetchBeingWorld(state.selectedBeingId);
     }
   } catch {
-    // Keep existing frame gracefully if server briefly restarts
+    // Keep existing frame gracefully
   }
 }
 
 // ---------------------------------------------------------------------------
 // Interactive Controls & Event Listeners
 // ---------------------------------------------------------------------------
+camIsoBtn.addEventListener("click", () => setCameraMode("iso"));
+camArenaBtn.addEventListener("click", () => setCameraMode("arena"));
+camFollowBtn.addEventListener("click", () => setCameraMode("follow"));
+camZoomInBtn.addEventListener("click", () => {
+  state.camera.targetZoom = Math.min(2.2, state.camera.targetZoom + 0.16);
+});
+camZoomOutBtn.addEventListener("click", () => {
+  state.camera.targetZoom = Math.max(0.5, state.camera.targetZoom - 0.16);
+});
+
 voicePillBtn.addEventListener("click", () => {
-  const open = voicePopoverEl.classList.toggle("hidden");
-  voicePillBtn.setAttribute("aria-expanded", String(!open));
-  populateVoices();
+  const hidden = voicePopoverEl.classList.toggle("hidden");
+  voicePillBtn.setAttribute("aria-expanded", String(!hidden));
+  if (!hidden) {
+    vitalityPopoverEl.classList.add("hidden");
+    vitalityPillBtn.setAttribute("aria-expanded", "false");
+    populateVoices();
+    positionPopoverInViewport(voicePopoverEl, voicePillBtn);
+  }
 });
 
 voiceCloseBtn.addEventListener("click", () => {
@@ -1312,6 +2285,11 @@ voiceSelectEl.addEventListener("change", () => {
 vitalityPillBtn.addEventListener("click", () => {
   const hidden = vitalityPopoverEl.classList.toggle("hidden");
   vitalityPillBtn.setAttribute("aria-expanded", String(!hidden));
+  if (!hidden) {
+    voicePopoverEl.classList.add("hidden");
+    voicePillBtn.setAttribute("aria-expanded", "false");
+    positionPopoverInViewport(vitalityPopoverEl, vitalityPillBtn);
+  }
 });
 
 vitalityCloseBtn.addEventListener("click", () => {
@@ -1324,13 +2302,13 @@ drawerCloseBtn.addEventListener("click", () => {
   state.selectedBeingWorld = null;
   sanctuaryHudEl?.classList.remove("drawer-open");
   beingDrawerEl.classList.add("hidden");
-  computeZonePositions();
-  syncBeingsAnimationState(state.universe?.beings || []);
   renderBeingsStrip(state.universe?.beings || []);
 });
 
 hearBeingBtn.addEventListener("click", () => {
   const being = (state.universe?.beings || []).find((b) => b.id === state.selectedBeingId);
+  const anim = state.beingsAnim.get(state.selectedBeingId);
+  if (anim) anim.speakTimer = 3.0;
   const fallback = being
     ? `I am ${being.name}, ${being.mood_phrase || "keeping quiet watch"} in ${prettifyZone(being.zone)}. My calling is ${being.soul?.calling || "steward"}.`
     : "I am listening within the sanctuary.";
@@ -1376,7 +2354,7 @@ sparkForm.addEventListener("submit", async (ev) => {
     sparkFeedbackEl.textContent = "Whisper a few words first to send a spark.";
     return;
   }
-  sparkFeedbackEl.textContent = "Sending your spark across the sanctuary…";
+  sparkFeedbackEl.textContent = "Sending your spark across the 3D sanctuary…";
   triggerRipple(zone, kind === "incident" ? "#fb8a70" : "#f6c46d", 1.35);
   triggerFilament("hub", zone, "#ffdfa3");
   playHarmonicChime("spark");
@@ -1400,6 +2378,35 @@ sparkForm.addEventListener("submit", async (ev) => {
     await refreshUniverse();
   } catch (err) {
     sparkFeedbackEl.textContent = err?.message || "The sanctuary could not catch that spark right now.";
+  }
+});
+
+startTrialBtn.addEventListener("click", async () => {
+  const customTitle = sparkInputEl.value.trim() || "Starlight Harmony Trial";
+  sparkFeedbackEl.textContent = "Opening a Playground Trial in Starlight Arena…";
+  triggerRipple("playground", "#f6c46d", 1.45);
+  triggerFilament("hub", "playground", "#ffdfa3");
+  playHarmonicChime("reward");
+
+  try {
+    const res = await fetch("/api/pulse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ zone: "playground", spark: customTitle, kind: "competition" }),
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || result.ok === false) {
+      throw new Error(result.error || "Trial paused");
+    }
+    sparkInputEl.value = "";
+    sparkFeedbackEl.textContent =
+      result.acknowledgment || "A friendly Playground Trial has begun!";
+    if (state.speechEnabled && result.spoken_reply) {
+      speakText(result.spoken_reply);
+    }
+    await refreshUniverse();
+  } catch (err) {
+    sparkFeedbackEl.textContent = err?.message || "Could not start the Playground Trial right now.";
   }
 });
 

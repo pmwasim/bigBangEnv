@@ -90,3 +90,42 @@ def test_http_world_server_connects_runner_organisms(tmp_path):
     finally:
         srv.shutdown()
         srv.server_close()
+
+
+def test_shared_world_doors_competitions_rewards_and_punishments(tmp_path):
+    w = SharedWorld(state_path=tmp_path / "world3d.json")
+    w.enter("bb-gamma-scout", role="scout", zone="frontier")
+    w.enter("bb-gamma-arbiter", role="arbiter", zone="playground")
+    assert "playground" in w.zones
+    assert w.zones["hub"].x == 0.0 and w.zones["playground"].y > 0.0
+
+    # Moving across adjacent playground <-> hub doorway tracks door crossings
+    mv = w.move("bb-gamma-scout", "playground")
+    assert mv["moved"] is True
+    assert mv["door"] == "door:frontier:playground"
+    assert w.doors["door:frontier:playground"]["crossings"] == 1
+
+    # Competition, reward, and punishment
+    comp = w.start_competition("Harmony Trial", kind="harmony_trial", duration=4)
+    assert comp["status"] == "active"
+    rew = w.award_reward("bb-gamma-scout", honor=2, reason="swift pathfinding")
+    assert rew["ok"] is True
+    assert w.bodies["bb-gamma-scout"]["honor"] == 2
+
+    pun = w.apply_punishment("bb-gamma-scout", penalty=3, reason="rushed past a quiet gate", guard_door=True)
+    assert pun["ok"] is True
+    assert w.bodies["bb-gamma-scout"]["honor"] == -1
+    assert w.bodies["bb-gamma-scout"]["penance_ticks"] >= 4
+    blocked = w.move("bb-gamma-scout", "hub")
+    assert blocked["moved"] is False
+
+    # Advancing steps settles penance & completes the trial
+    w.step(5)
+    assert w.bodies["bb-gamma-scout"]["penance_ticks"] == 0
+    assert w.competition is not None and w.competition["status"] == "completed"
+    assert w.competition["winner"] is not None
+
+    # Persistence round-trip preserves 3D doors, competition, and rewards_log
+    w2 = SharedWorld(state_path=tmp_path / "world3d.json")
+    assert w2.competition is not None and w2.competition["status"] == "completed"
+    assert len(w2.rewards_log) >= 2
