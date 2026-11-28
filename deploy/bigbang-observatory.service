@@ -1,0 +1,19 @@
+[Unit]
+Description=bigBangEnv Living World Observatory Web Server
+Documentation=https://github.com/pmwasim/bigBangEnv
+After=network.target bigbang-world.service
+Wants=bigbang-world.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/bigbang-world
+Environment=PYTHONPATH=/opt/bigbang-world/src
+ExecStart=/usr/bin/python3 -m bigbang observatory --host 0.0.0.0 --port 8888 --world http://127.0.0.1:8787 --incus
+Restart=on-failure
+RestartSec=3s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bigbang-observatory
+
+[Install]
+WantedBy=multi-user.target

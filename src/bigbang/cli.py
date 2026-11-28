@@ -180,6 +180,48 @@ def cmd_world(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_observatory(args: argparse.Namespace) -> int:
+    import signal
+    import threading
+    from .observatory import ObservatoryBackend, make_observatory_server
+
+    backend = ObservatoryBackend(
+        world_url=args.world,
+        world_state_path=args.world_state,
+        state_dirs=args.state_dir,
+        incus=args.incus,
+        demo=args.demo,
+        sim_interval=args.interval,
+    )
+    backend.start_background_loop()
+    srv = make_observatory_server(backend, host=args.host, port=args.port)
+    actual_port = srv.server_address[1]
+    print(
+        json.dumps(
+            {
+                "observatory": f"http://{args.host}:{actual_port}",
+                "mode": backend.source_mode,
+                "world": args.world,
+                "incus": args.incus,
+            }
+        ),
+        flush=True,
+    )
+
+    def _shutdown(_signum: int, _frame: Any) -> None:
+        threading.Thread(target=srv.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, _shutdown)
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        backend.stop()
+        srv.server_close()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bigbang", description=__doc__)
     parser.add_argument("--version", action="version", version=f"bigbang {__version__}")
@@ -273,6 +315,17 @@ def build_parser() -> argparse.ArgumentParser:
     wd.add_argument("--ticks", type=int, default=1)
     wd.add_argument("--interval", type=float, default=2.0, help="seconds per world tick when serving")
     wd.set_defaults(func=cmd_world)
+
+    obs = sub.add_parser("observatory", help="serve the Living World Observatory web UI and API")
+    obs.add_argument("--host", default="127.0.0.1", help="bind host (default: 127.0.0.1)")
+    obs.add_argument("--port", type=int, default=8888, help="bind port (default: 8888)")
+    obs.add_argument("--world", help="optional SharedWorld HTTP base URL (e.g. http://127.0.0.1:8787)")
+    obs.add_argument("--world-state", help="optional local SharedWorld state JSON path")
+    obs.add_argument("--state-dir", action="append", help="optional local organism state directory (repeatable)")
+    obs.add_argument("--demo", action="store_true", help="run live simulated cosmos with multi-Body organisms")
+    obs.add_argument("--incus", action="store_true", help="discover live bb-* Incus containers on this host")
+    obs.add_argument("--interval", type=float, default=2.5, help="seconds between demo heartbeat ticks")
+    obs.set_defaults(func=cmd_observatory)
     return parser
 
 
