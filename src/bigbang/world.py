@@ -136,7 +136,7 @@ def body_world(
 
 @dataclass
 class Zone:
-    """A spatial neighborhood in the World with finite ambient energy and entropy."""
+    """A spatial neighborhood in the World with finite ambient energy, entropy, and 3D coords."""
 
     name: str
     neighbors: tuple[str, ...] = ()
@@ -145,6 +145,10 @@ class Zone:
     regen_rate: float = 5.0
     ambient_entropy: float = 0.0
     hazard: float = 0.0
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+    radius: float = 135.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -155,10 +159,15 @@ class Zone:
             "regen_rate": self.regen_rate,
             "ambient_entropy": round(self.ambient_entropy, 4),
             "hazard": round(self.hazard, 4),
+            "x": round(self.x, 2),
+            "y": round(self.y, 2),
+            "z": round(self.z, 2),
+            "radius": round(self.radius, 2),
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Zone:
+        defaults = _ZONE_COORDS.get(str(data["name"]), (0.0, 0.0, 0.0, 135.0))
         return cls(
             name=str(data["name"]),
             neighbors=tuple(data.get("neighbors", ())),
@@ -167,6 +176,10 @@ class Zone:
             regen_rate=float(data.get("regen_rate", 5.0)),
             ambient_entropy=float(data.get("ambient_entropy", 0.0)),
             hazard=float(data.get("hazard", 0.0)),
+            x=float(data.get("x", defaults[0])),
+            y=float(data.get("y", defaults[1])),
+            z=float(data.get("z", defaults[2])),
+            radius=float(data.get("radius", defaults[3])),
         )
 
 
@@ -213,14 +226,100 @@ class WorldEntity:
         )
 
 
+_ZONE_COORDS: dict[str, tuple[float, float, float, float]] = {
+    "hub": (0.0, 0.0, 14.0, 145.0),
+    "alpha-sector": (-245.0, -110.0, 6.0, 135.0),
+    "beta-sector": (245.0, -110.0, 6.0, 135.0),
+    "playground": (0.0, 110.0, 10.0, 125.0),
+    "frontier": (0.0, 255.0, 22.0, 130.0),
+}
+
+_HOME_META: dict[str, tuple[str, str, tuple[float, float, float]]] = {
+    "hub": ("home-hub", "Hearthstone Cottage", (-48.0, -36.0, 14.0)),
+    "alpha-sector": ("home-alpha", "Lantern Sanctuary Lodge", (-295.0, -148.0, 6.0)),
+    "beta-sector": ("home-beta", "Starforge Homestead", (295.0, -148.0, 6.0)),
+    "playground": ("home-playground", "Arbiter's Pavilion", (-48.0, 142.0, 10.0)),
+    "frontier": ("home-frontier", "Horizon Watchtower", (-46.0, 290.0, 22.0)),
+}
+
+
 def default_zones() -> dict[str, Zone]:
-    """Genesis spatial topology connecting Hub, Alpha/Beta Sectors, and Frontier."""
+    """Genesis spatial topology connecting Hub, Alpha/Beta Sectors, Playground, and Frontier."""
     return {
-        "hub": Zone("hub", neighbors=("alpha-sector", "beta-sector"), energy_reserve=2000.0, max_energy=2000.0, regen_rate=10.0),
-        "alpha-sector": Zone("alpha-sector", neighbors=("hub", "frontier"), energy_reserve=1000.0, max_energy=1000.0, regen_rate=5.0),
-        "beta-sector": Zone("beta-sector", neighbors=("hub", "frontier"), energy_reserve=1000.0, max_energy=1000.0, regen_rate=5.0),
-        "frontier": Zone("frontier", neighbors=("alpha-sector", "beta-sector"), energy_reserve=600.0, max_energy=800.0, regen_rate=3.0, hazard=0.15),
+        "hub": Zone(
+            "hub",
+            neighbors=("alpha-sector", "beta-sector", "playground"),
+            energy_reserve=2000.0,
+            max_energy=2000.0,
+            regen_rate=10.0,
+            x=0.0, y=0.0, z=14.0, radius=145.0,
+        ),
+        "alpha-sector": Zone(
+            "alpha-sector",
+            neighbors=("hub", "frontier"),
+            energy_reserve=1000.0,
+            max_energy=1000.0,
+            regen_rate=5.0,
+            x=-245.0, y=-110.0, z=6.0, radius=135.0,
+        ),
+        "beta-sector": Zone(
+            "beta-sector",
+            neighbors=("hub", "frontier"),
+            energy_reserve=1000.0,
+            max_energy=1000.0,
+            regen_rate=5.0,
+            x=245.0, y=-110.0, z=6.0, radius=135.0,
+        ),
+        "playground": Zone(
+            "playground",
+            neighbors=("hub", "frontier"),
+            energy_reserve=1200.0,
+            max_energy=1200.0,
+            regen_rate=6.0,
+            x=0.0, y=110.0, z=10.0, radius=125.0,
+        ),
+        "frontier": Zone(
+            "frontier",
+            neighbors=("alpha-sector", "beta-sector", "playground"),
+            energy_reserve=600.0,
+            max_energy=800.0,
+            regen_rate=3.0,
+            hazard=0.15,
+            x=0.0, y=255.0, z=22.0, radius=130.0,
+        ),
     }
+
+
+def _door_key(zone_a: str, zone_b: str) -> str:
+    a, b = sorted((zone_a, zone_b))
+    return f"door:{a}:{b}"
+
+
+def _build_doors(zones: dict[str, Zone]) -> dict[str, dict[str, Any]]:
+    doors: dict[str, dict[str, Any]] = {}
+    for zname, zone in sorted(zones.items()):
+        for nb in zone.neighbors:
+            if nb not in zones:
+                continue
+            did = _door_key(zname, nb)
+            if did in doors:
+                continue
+            a, b = sorted((zname, nb))
+            za, zb = zones[a], zones[b]
+            doors[did] = {
+                "id": did,
+                "zone_a": a,
+                "zone_b": b,
+                "x": round((za.x + zb.x) * 0.5, 2),
+                "y": round((za.y + zb.y) * 0.5, 2),
+                "z": round((za.z + zb.z) * 0.5 + 4.0, 2),
+                "state": "open",
+                "guarded_until_tick": 0,
+                "crossings": 0,
+                "last_crosser": None,
+                "last_crossed_tick": None,
+            }
+    return doors
 
 
 class SharedWorld:
@@ -242,6 +341,9 @@ class SharedWorld:
         self.territory = TerritoryTable()
         self.events: list[dict[str, Any]] = []
         self._next_seq: int = 1
+        self.doors: dict[str, dict[str, Any]] = _build_doors(self.zones)
+        self.competition: dict[str, Any] | None = None
+        self.rewards_log: list[dict[str, Any]] = []
         if self.state_path and self.state_path.exists():
             self._load_unlocked(json.loads(self.state_path.read_text(encoding="utf-8")))
 
@@ -268,6 +370,13 @@ class SharedWorld:
         self.entities = {k: WorldEntity.from_dict(v) for k, v in data.get("entities", {}).items()}
         self._issue_index = {e.issue_id: e.entity_id for e in self.entities.values()}
         self.events = list(data.get("events", []))[-256:]
+        self.doors = _build_doors(self.zones)
+        for did, ddata in data.get("doors", {}).items():
+            if did in self.doors and isinstance(ddata, dict):
+                self.doors[did].update(ddata)
+        comp = data.get("competition")
+        self.competition = dict(comp) if isinstance(comp, dict) else None
+        self.rewards_log = list(data.get("rewards_log", []))[-100:]
 
     def to_dict(self) -> dict[str, Any]:
         with self._lock:
@@ -279,6 +388,9 @@ class SharedWorld:
                 "entities": {k: e.to_dict() for k, e in sorted(self.entities.items())},
                 "territory": {res: [h, exp] for res, (h, exp) in sorted(self.territory.claims.items())},
                 "events": list(self.events[-50:]),
+                "doors": {k: dict(v) for k, v in sorted(self.doors.items())},
+                "competition": dict(self.competition) if self.competition else None,
+                "rewards_log": list(self.rewards_log[-50:]),
             }
 
     @classmethod
@@ -296,6 +408,7 @@ class SharedWorld:
             if zone not in self.zones:
                 raise KeyError(f"unknown zone {zone!r}")
             existing = self.bodies.get(body_id, {})
+            home_meta = _HOME_META.get(existing.get("zone", zone), ("home-hub", "Hearthstone Cottage", (-48.0, -36.0, 14.0)))
             rec = {
                 "body_id": body_id,
                 "role": role,
@@ -304,6 +417,14 @@ class SharedWorld:
                 "last_seen_tick": self.tick,
                 "energy_harvested": float(existing.get("energy_harvested", 0.0)),
                 "actions_completed": int(existing.get("actions_completed", 0)),
+                "honor": int(existing.get("honor", 0)),
+                "rewards": int(existing.get("rewards", 0)),
+                "punishments": int(existing.get("punishments", 0)),
+                "penance_ticks": int(existing.get("penance_ticks", 0)),
+                "home": str(existing.get("home", home_meta[0])),
+                "walk_state": str(existing.get("walk_state", "walking_path")),
+                "last_move_tick": int(existing.get("last_move_tick", self.tick)),
+                "last_from_zone": existing.get("last_from_zone"),
             }
             self.bodies[body_id] = rec
             self._log("enter", body=body_id, zone=rec["zone"], role=role)
@@ -311,22 +432,36 @@ class SharedWorld:
             return dict(rec)
 
     def move(self, body_id: str, target_zone: str) -> dict[str, Any]:
-        """Enforce topological Locality: Bodies move step-by-step between neighboring Zones."""
+        """Enforce topological Locality: Bodies move step-by-step between neighboring Zones via Doors."""
         with self._lock:
             if body_id not in self.bodies:
                 return {"moved": False, "reason": "unknown_body"}
             if target_zone not in self.zones:
                 return {"moved": False, "reason": "unknown_zone"}
-            cur = self.bodies[body_id]["zone"]
+            body = self.bodies[body_id]
+            cur = body["zone"]
             if cur == target_zone:
                 return {"moved": True, "zone": target_zone}
             if target_zone not in self.zones[cur].neighbors:
                 return {"moved": False, "reason": "not_adjacent", "from": cur, "to": target_zone}
-            self.bodies[body_id]["zone"] = target_zone
-            self.bodies[body_id]["last_seen_tick"] = self.tick
-            self._log("move", body=body_id, from_zone=cur, to_zone=target_zone)
+            if int(body.get("penance_ticks", 0)) > 0:
+                return {"moved": False, "reason": "penance_cooldown", "penance_ticks": body["penance_ticks"]}
+            did = _door_key(cur, target_zone)
+            door = self.doors.get(did)
+            if door and door.get("state") == "guarded" and int(body.get("honor", 0)) < 0:
+                return {"moved": False, "reason": "door_guarded", "door": did}
+            body["zone"] = target_zone
+            body["last_seen_tick"] = self.tick
+            body["last_move_tick"] = self.tick
+            body["last_from_zone"] = cur
+            body["walk_state"] = "crossing_door"
+            if door is not None:
+                door["crossings"] = int(door.get("crossings", 0)) + 1
+                door["last_crosser"] = body_id
+                door["last_crossed_tick"] = self.tick
+            self._log("move", body=body_id, from_zone=cur, to_zone=target_zone, door=did)
             self.save()
-            return {"moved": True, "zone": target_zone}
+            return {"moved": True, "zone": target_zone, "door": did}
 
     def spawn_entity(
         self,
@@ -441,12 +576,135 @@ class SharedWorld:
             zone.ambient_entropy = round(zone.ambient_entropy + max(0.0, entropy_cost), 4)
             self.bodies[body_id]["actions_completed"] += 1
             self.bodies[body_id]["last_seen_tick"] = self.tick
+            if self.competition and self.competition.get("status") == "active":
+                scores = self.competition.setdefault("scores", {})
+                if body_id in scores or body_zone == self.competition.get("zone"):
+                    scores[body_id] = round(float(scores.get(body_id, 0.0)) + 2.5, 2)
+                    if body_id not in self.competition["participants"]:
+                        self.competition["participants"].append(body_id)
             self._log("world_act", body=body_id, zone=body_zone, entity=eid, verb=verb, label=label, state=ent.state)
             self.save()
             return {"ok": True, "entity": ent.to_dict()}
 
+    # ----------------------------------------------------------- competitions, rewards & punishments
+    def start_competition(
+        self,
+        title: str = "Starlight Harmony Trial",
+        *,
+        kind: str = "harmony_trial",
+        duration: int = 10,
+    ) -> dict[str, Any]:
+        """Begin a friendly trial in the Playground Arena where inhabitants gather and earn honor."""
+        with self._lock:
+            cleaned_kind = kind if kind in ("triage_race", "harmony_trial") else "harmony_trial"
+            arena_zone = "playground" if "playground" in self.zones else "hub"
+            seq = self._next_seq
+            self._next_seq += 1
+            participants = sorted(self.bodies.keys())
+            scores = {
+                bid: round(float(self.bodies[bid].get("actions_completed", 0)) * 0.25 + float(self.bodies[bid].get("honor", 0)) * 0.4, 2)
+                for bid in participants
+            }
+            comp = {
+                "id": f"trial:{seq}",
+                "title": title.strip() or "Starlight Harmony Trial",
+                "kind": cleaned_kind,
+                "zone": arena_zone,
+                "started_tick": self.tick,
+                "ends_tick": self.tick + max(3, int(duration)),
+                "status": "active",
+                "participants": participants,
+                "scores": scores,
+                "winner": None,
+            }
+            self.competition = comp
+            self.spawn_entity(
+                arena_zone,
+                kind="curiosity",
+                title=f"[feature] {comp['title']} beacon",
+                body="A luminous trial beacon invites participants to shine with care and swift grace.",
+                risk=0.08,
+                ttl=max(12, int(duration) + 6),
+            )
+            self._log("competition_start", title=comp["title"], kind=cleaned_kind, zone=arena_zone, trial_id=comp["id"])
+            self.save()
+            return dict(comp)
+
+    def award_reward(self, body_id: str, *, honor: int = 1, reason: str = "graceful stewardship") -> dict[str, Any]:
+        """Bestow honor and an energy feast upon an inhabitant."""
+        with self._lock:
+            if body_id not in self.bodies:
+                return {"ok": False, "reason": "unknown_body"}
+            amt = max(1, int(honor))
+            body = self.bodies[body_id]
+            body["honor"] = int(body.get("honor", 0)) + amt
+            body["rewards"] = int(body.get("rewards", 0)) + 1
+            body["last_reward_tick"] = self.tick
+            zname = body["zone"]
+            zone = self.zones[zname]
+            zone.energy_reserve = round(min(zone.max_energy, zone.energy_reserve + 25.0 * amt), 3)
+            entry = {
+                "id": f"rew-{self.tick}-{len(self.rewards_log) + 1}",
+                "tick": self.tick,
+                "kind": "reward",
+                "body_id": body_id,
+                "zone": zname,
+                "amount": amt,
+                "reason": reason,
+            }
+            self.rewards_log.append(entry)
+            if len(self.rewards_log) > 100:
+                del self.rewards_log[:-100]
+            self._log("reward", body=body_id, zone=zname, honor=amt, reason=reason)
+            self.save()
+            return {"ok": True, "body": dict(body), "entry": entry}
+
+    def apply_punishment(
+        self,
+        body_id: str,
+        *,
+        penalty: int = 1,
+        reason: str = "overstepped gentle bounds",
+        guard_door: bool = False,
+    ) -> dict[str, Any]:
+        """Apply gentle correction: lower honor, add brief penance rest, optionally guard a nearby door."""
+        with self._lock:
+            if body_id not in self.bodies:
+                return {"ok": False, "reason": "unknown_body"}
+            amt = max(1, int(penalty))
+            body = self.bodies[body_id]
+            body["honor"] = int(body.get("honor", 0)) - amt
+            body["punishments"] = int(body.get("punishments", 0)) + 1
+            body["penance_ticks"] = max(int(body.get("penance_ticks", 0)), 4)
+            body["last_punishment_tick"] = self.tick
+            body["walk_state"] = "guarding"
+            zname = body["zone"]
+            guarded_door = None
+            if guard_door:
+                for did, door in sorted(self.doors.items()):
+                    if zname in (door["zone_a"], door["zone_b"]):
+                        door["state"] = "guarded"
+                        door["guarded_until_tick"] = self.tick + 4
+                        guarded_door = did
+                        break
+            entry = {
+                "id": f"pun-{self.tick}-{len(self.rewards_log) + 1}",
+                "tick": self.tick,
+                "kind": "punishment",
+                "body_id": body_id,
+                "zone": zname,
+                "amount": amt,
+                "reason": reason,
+            }
+            self.rewards_log.append(entry)
+            if len(self.rewards_log) > 100:
+                del self.rewards_log[:-100]
+            self._log("punishment", body=body_id, zone=zname, penalty=amt, reason=reason, door=guarded_door)
+            self.save()
+            return {"ok": True, "body": dict(body), "entry": entry, "guarded_door": guarded_door}
+
     def step(self, ticks: int = 1) -> int:
-        """Advance planetary physics: regenerate Zone reserves, cool entropy, expire entities."""
+        """Advance planetary physics: regenerate Zone reserves, cool entropy, expire entities, advance trials."""
         with self._lock:
             for _ in range(max(1, int(ticks))):
                 self.tick += 1
@@ -461,14 +719,103 @@ class SharedWorld:
                     if ent.state in ("open", "labelled") and ent.expired(self.tick):
                         ent.state = "decayed"
                         self._log("entity_decay", entity=ent.entity_id, zone=ent.zone)
+                for body in self.bodies.values():
+                    if int(body.get("penance_ticks", 0)) > 0:
+                        body["penance_ticks"] = max(0, int(body["penance_ticks"]) - 1)
+                    if body.get("walk_state") == "crossing_door" and (self.tick - int(body.get("last_move_tick", self.tick))) >= 2:
+                        body["walk_state"] = "walking_path"
+                for door in self.doors.values():
+                    if door.get("state") == "guarded" and int(door.get("guarded_until_tick", 0)) <= self.tick:
+                        door["state"] = "open"
+                if self.competition and self.competition.get("status") == "active":
+                    comp = self.competition
+                    scores = comp.setdefault("scores", {})
+                    for bid in comp.get("participants", []):
+                        if bid in self.bodies and self.bodies[bid].get("zone") == comp.get("zone"):
+                            scores[bid] = round(float(scores.get(bid, 0.0)) + 0.5, 2)
+                    if self.tick >= int(comp.get("ends_tick", self.tick)):
+                        comp["status"] = "completed"
+                        if scores:
+                            winner = max(scores.items(), key=lambda kv: (kv[1], kv[0]))[0]
+                            comp["winner"] = winner
+                            self._log("competition_end", title=comp["title"], winner=winner, zone=comp["zone"])
+                            if winner in self.bodies:
+                                self.award_reward(winner, honor=2, reason=f"crowned winner of {comp['title']}")
             self.save()
             return self.tick
+
+    def places_snapshot(self) -> dict[str, Any]:
+        """Return structured 3D places (lands, homes, playgrounds, paths, doors) and trials."""
+        with self._lock:
+            lands = [
+                {
+                    "id": f"land:{z.name}",
+                    "zone": z.name,
+                    "x": z.x,
+                    "y": z.y,
+                    "z": z.z,
+                    "radius": z.radius,
+                    "elevation": z.z,
+                }
+                for z in sorted(self.zones.values(), key=lambda item: item.name)
+            ]
+            homes = []
+            for zname, (hid, hname, (hx, hy, hz)) in sorted(_HOME_META.items()):
+                if zname in self.zones:
+                    residents = [bid for bid, b in sorted(self.bodies.items()) if b.get("home") == hid]
+                    homes.append({
+                        "id": hid,
+                        "name": hname,
+                        "zone": zname,
+                        "x": hx,
+                        "y": hy,
+                        "z": hz,
+                        "residents": residents,
+                    })
+            playgrounds = []
+            if "playground" in self.zones:
+                pz = self.zones["playground"]
+                playgrounds.append({
+                    "id": "starlight-arena",
+                    "name": "Starlight Arena",
+                    "zone": "playground",
+                    "x": pz.x,
+                    "y": pz.y,
+                    "z": pz.z,
+                    "radius": 105.0,
+                    "active": bool(self.competition and self.competition.get("status") == "active"),
+                })
+            paths = []
+            doors_out = []
+            for did, door in sorted(self.doors.items()):
+                za = self.zones.get(door["zone_a"])
+                zb = self.zones.get(door["zone_b"])
+                if za and zb:
+                    paths.append({
+                        "id": f"path:{door['zone_a']}:{door['zone_b']}",
+                        "from_zone": door["zone_a"],
+                        "to_zone": door["zone_b"],
+                        "from_pos": {"x": za.x, "y": za.y, "z": za.z},
+                        "to_pos": {"x": zb.x, "y": zb.y, "z": zb.z},
+                        "door_id": did,
+                    })
+                doors_out.append(dict(door))
+            return {
+                "lands": lands,
+                "homes": homes,
+                "playgrounds": playgrounds,
+                "paths": paths,
+                "doors": doors_out,
+                "competition": dict(self.competition) if self.competition else None,
+                "rewards_log": list(self.rewards_log[-25:]),
+            }
 
     def summary(self) -> dict[str, Any]:
         with self._lock:
             counts: dict[str, int] = {}
             for ent in self.entities.values():
                 counts[ent.state] = counts.get(ent.state, 0) + 1
+            places = self.places_snapshot()
             return {
                 "tick": self.tick,
                 "zones": {k: z.to_dict() for k, z in sorted(self.zones.items())},
@@ -476,6 +823,7 @@ class SharedWorld:
                 "entities_total": len(self.entities),
                 "entity_states": counts,
                 "recent_events": list(self.events[-15:]),
+                **places,
             }
 
 
@@ -530,6 +878,19 @@ class WorldClient:
 
     def step(self, ticks: int = 1) -> dict[str, Any]:
         return self._req("POST", "/step", {"ticks": ticks})
+
+    def start_competition(self, title: str = "Starlight Harmony Trial", *, kind: str = "harmony_trial") -> dict[str, Any]:
+        return self._req("POST", "/competition", {"title": title, "kind": kind})
+
+    def award_reward(self, body_id: str, *, honor: int = 1, reason: str = "graceful stewardship") -> dict[str, Any]:
+        return self._req("POST", "/reward", {"body_id": body_id, "honor": honor, "reason": reason})
+
+    def apply_punishment(
+        self, body_id: str, *, penalty: int = 1, reason: str = "overstepped gentle bounds", guard_door: bool = False
+    ) -> dict[str, Any]:
+        return self._req("POST", "/punishment", {
+            "body_id": body_id, "penalty": penalty, "reason": reason, "guard_door": guard_door,
+        })
 
 
 def make_world_server(
@@ -597,6 +958,23 @@ def make_world_server(
                 elif self.path == "/step":
                     tick = world.step(int(data.get("ticks", 1)))
                     self._send(200, {"tick": tick})
+                elif self.path == "/competition":
+                    comp = world.start_competition(
+                        str(data.get("title", "Starlight Harmony Trial")),
+                        kind=str(data.get("kind", "harmony_trial")),
+                    )
+                    self._send(200, comp)
+                elif self.path == "/reward":
+                    self._send(200, world.award_reward(
+                        data["body_id"], honor=int(data.get("honor", 1)), reason=str(data.get("reason", "graceful stewardship"))
+                    ))
+                elif self.path == "/punishment":
+                    self._send(200, world.apply_punishment(
+                        data["body_id"],
+                        penalty=int(data.get("penalty", 1)),
+                        reason=str(data.get("reason", "overstepped gentle bounds")),
+                        guard_door=bool(data.get("guard_door", False)),
+                    ))
                 else:
                     self._send(404, {"error": "not found"})
             except (KeyError, ValueError, json.JSONDecodeError) as exc:

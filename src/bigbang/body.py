@@ -15,7 +15,7 @@ from .lineages import Defense, Motor
 from .matter import MatterStore
 from .organ import Organ
 from .signal import Trust
-from .soul import BeliefSystem, Character, Soul
+from .soul import Anatomy, BeliefSystem, Character, Soul
 from .world import cell_world, organ_world
 
 MAX_TITLE, MAX_BODY = 300, 20_000
@@ -649,24 +649,28 @@ class OutcomeSensor(Cell):
         role: str = "general",
         soul: Soul | None = None,
         character: Character | None = None,
+        anatomy: Anatomy | None = None,
         **kw: Any,
     ):
         kw.setdefault("emits", [])
         super().__init__(name, **kw)
         self._default_soul = (soul or Soul.create(f"body-{role}", calling=role)).to_dict()
         self._default_character = (character or Character.for_role(role)).to_dict()
+        self._default_anatomy = (anatomy or Anatomy.for_role(role)).to_dict()
         self.memory.update(
             verified=0,
             failures=0,
             karma=0.0,
             soul=self._default_soul,
             character=self._default_character,
+            anatomy=self._default_anatomy,
             beliefs={},
         )
 
     def step(self, ctx: Context) -> None:
         self.memory.setdefault("soul", self._default_soul)
         self.memory.setdefault("character", self._default_character)
+        self.memory.setdefault("anatomy", self._default_anatomy)
         beliefs = BeliefSystem.from_dict(self.memory.get("beliefs", {}))
         karma = float(self.memory.get("karma", 0.0))
         for s in ctx.inbox:
@@ -729,6 +733,7 @@ def build_body(
     brain: Brain | None = None,
     soul: Soul | None = None,
     character: Character | None = None,
+    anatomy: Anatomy | None = None,
 ) -> tuple[Kernel, Ledger, Genome, dict[str, Organ]]:
     """Boot a unified 5-organ living Body coupled to an authoritative Kernel."""
     cfg = {
@@ -747,6 +752,7 @@ def build_body(
     genome = genome or Genome(identity=f"body-{cfg['role']}", role=cfg["role"])
     soul = soul or Soul.create(genome.identity, calling=cfg["role"])
     character = character or Character.for_role(cfg["role"])
+    anatomy = anatomy or Anatomy.for_role(cfg["role"])
     ledger = ledger or Ledger()
     brain = brain or (make_brain(cfg["brain"], **cfg["brain_options"]) if cfg["brain"] else RuleBrain())
 
@@ -814,7 +820,7 @@ def build_body(
     )
     action_organ.add_cell(Commander(), share=1.0)
     action_organ.add_cell(Motor("action.motor", ledger.effectors(), resume_per_tick=pace), share=1.0)
-    action_organ.add_cell(OutcomeSensor(role=cfg["role"], soul=soul, character=character), share=1.0)
+    action_organ.add_cell(OutcomeSensor(role=cfg["role"], soul=soul, character=character, anatomy=anatomy), share=1.0)
 
     organs: dict[str, Organ] = {
         "perception": perception_organ,
@@ -841,6 +847,7 @@ def build_body(
         organ.mount(kernel)
     kernel.cells["action.verifier"].memory["soul"] = soul.to_dict()
     kernel.cells["action.verifier"].memory["character"] = character.to_dict()
+    kernel.cells["action.verifier"].memory["anatomy"] = anatomy.to_dict()
 
     return kernel, ledger, genome, organs
 
@@ -862,6 +869,7 @@ def body_report(kernel: Kernel, ledger: Ledger, genome: Genome, organs: dict[str
     stem = kernel.cells["deliberation.stem"].memory
     soul_data = verifier.get("soul") or Soul.create(genome.identity, calling=genome.role).to_dict()
     char_data = verifier.get("character") or Character.for_role(genome.role).to_dict()
+    anatomy_data = verifier.get("anatomy") or Anatomy.for_role(genome.role).to_dict()
     v_total = max(1, verifier["verified"] + verifier["failures"])
     spine_total = reflex["hits"] + reflex["compiled_hits"]
     return {
@@ -869,6 +877,7 @@ def body_report(kernel: Kernel, ledger: Ledger, genome: Genome, organs: dict[str
         "role": genome.role,
         "soul": {**soul_data, "karma": float(verifier.get("karma", 0.0))},
         "character": char_data,
+        "anatomy": anatomy_data,
         "beliefs": dict(verifier.get("beliefs", {})),
         "relative_worlds": {
             "organs": {name: organ_world(kernel, organ).to_dict() for name, organ in organs.items()},

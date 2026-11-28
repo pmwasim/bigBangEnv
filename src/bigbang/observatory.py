@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import mimetypes
 import os
 import re
@@ -13,6 +14,7 @@ import sys
 import threading
 import time
 import urllib.parse
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -23,8 +25,17 @@ from .body import Genome, build_body
 from .kernel import Kernel
 from .organ import Organ
 from .runtime import StateDir
-from .soul import BeliefSystem, Character, Soul
-from .world import RelativeWorld, SharedWorld, WorldClient, Zone, body_world
+from .soul import Anatomy, BeliefSystem, Character, Soul
+from .world import (
+    _HOME_META,
+    _ZONE_COORDS,
+    RelativeWorld,
+    SharedWorld,
+    WorldClient,
+    Zone,
+    _build_doors,
+    body_world,
+)
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
@@ -32,8 +43,22 @@ ZONE_LABELS: dict[str, str] = {
     "hub": "The Central Hearth",
     "alpha-sector": "Alpha Sanctuary",
     "beta-sector": "Beta Frontier",
+    "playground": "Starlight Playground",
     "frontier": "Far Horizon",
 }
+
+DEMO_ROSTER: tuple[tuple[str, str, str], ...] = (
+    ("bb-alpha-sentinel", "sentinel", "alpha-sector"),
+    ("bb-alpha-triage", "triage", "alpha-sector"),
+    ("bb-alpha-auditor", "auditor", "alpha-sector"),
+    ("bb-alpha-executor", "executor", "alpha-sector"),
+    ("bb-beta-planner", "planner", "beta-sector"),
+    ("bb-beta-executor", "executor", "beta-sector"),
+    ("bb-gamma-scout", "scout", "frontier"),
+    ("bb-gamma-artisan", "artisan", "hub"),
+    ("bb-gamma-arbiter", "arbiter", "playground"),
+    ("bb-gamma-weaver", "weaver", "hub"),
+)
 
 MODE_PHRASES: dict[str, str] = {
     "ALERT": "awake and attentive",
@@ -453,6 +478,111 @@ def _build_organs_from_snapshot(snap: dict[str, Any], body_data: dict[str, Any] 
     return out
 
 
+def _home_info_for(zone_name: str, explicit_home_id: str | None = None) -> dict[str, Any]:
+    hid, hname, coords = _HOME_META.get(zone_name, ("home-hub", "Hearthstone Cottage", (-48.0, -36.0, 14.0)))
+    if explicit_home_id:
+        for z, (zid, zname, zcoords) in _HOME_META.items():
+            if zid == explicit_home_id:
+                return {"id": zid, "name": zname, "zone": z, "coords": zcoords}
+    return {"id": hid, "name": hname, "zone": zone_name, "coords": coords}
+
+
+def _resolve_walk_state(
+    mode: str,
+    zone: str,
+    world_body: dict[str, Any],
+    world_tick: int,
+    competition: dict[str, Any] | None,
+) -> str:
+    if mode in ("SLEEP_REM", "DORMANT"):
+        return "resting_home"
+    if mode == "LOCKDOWN" or int(world_body.get("penance_ticks", 0)) > 0:
+        return "guarding"
+    if competition and competition.get("status") == "active" and zone == competition.get("zone"):
+        return "competing_playground"
+    last_move = int(world_body.get("last_move_tick", -99))
+    if world_body.get("walk_state") == "crossing_door" and (world_tick - last_move) <= 2:
+        return "crossing_door"
+    return "walking_path"
+
+
+def _compute_being_location(
+    body_id: str,
+    zone: str,
+    walk_state: str,
+    home_info: dict[str, Any],
+    zones_map: dict[str, Any],
+    slot_index: int,
+    slot_total: int,
+    world_body: dict[str, Any],
+    world_tick: int,
+) -> dict[str, Any]:
+    zdata = zones_map.get(zone, {})
+    defaults = _ZONE_COORDS.get(zone, (0.0, 0.0, 10.0, 130.0))
+    zx = float(zdata.get("x", defaults[0]))
+    zy = float(zdata.get("y", defaults[1]))
+    zz = float(zdata.get("z", defaults[2]))
+    radius = float(zdata.get("radius", defaults[3]))
+
+    if walk_state == "resting_home":
+        hx, hy, hz = home_info["coords"]
+        angle = (slot_index * 1.4) + 0.4
+        return {
+            "zone": zone,
+            "x": round(hx + math.cos(angle) * 18.0, 2),
+            "y": round(hy + math.sin(angle) * 18.0, 2),
+            "z": round(hz + 2.0, 2),
+            "walk_state": walk_state,
+        }
+
+    if walk_state == "crossing_door" and world_body.get("last_from_zone"):
+        frm = str(world_body["last_from_zone"])
+        fdefaults = _ZONE_COORDS.get(frm, (zx, zy, zz, radius))
+        fx = float(zones_map.get(frm, {}).get("x", fdefaults[0]))
+        fy = float(zones_map.get(frm, {}).get("y", fdefaults[1]))
+        fz = float(zones_map.get(frm, {}).get("z", fdefaults[2]))
+        return {
+            "zone": zone,
+            "x": round((zx * 0.72 + fx * 0.28), 2),
+            "y": round((zy * 0.72 + fy * 0.28), 2),
+            "z": round(max(zz, fz) + 5.0, 2),
+            "walk_state": walk_state,
+        }
+
+    angle = (2.0 * math.pi * slot_index / max(1, slot_total)) + (world_tick * 0.14)
+    orbit = min(radius * 0.48, 52.0 if walk_state == "competing_playground" else 62.0)
+    return {
+        "zone": zone,
+        "x": round(zx + math.cos(angle) * orbit, 2),
+        "y": round(zy + math.sin(angle) * orbit, 2),
+        "z": round(zz + (4.0 if walk_state == "competing_playground" else 2.5), 2),
+        "walk_state": walk_state,
+    }
+
+
+def _action_story_for(
+    name: str,
+    zone: str,
+    walk_state: str,
+    home_name: str,
+    mode: str,
+    competition: dict[str, Any] | None,
+) -> str:
+    where = zone_label(zone)
+    if walk_state == "resting_home":
+        return f"Resting peacefully inside {home_name}, distilling quiet memories."
+    if walk_state == "crossing_door":
+        return f"Stepping gracefully through the luminous doorway into {where}."
+    if walk_state == "competing_playground":
+        title = (competition or {}).get("title", "the Starlight Trial")
+        return f"Shining brightly inside {where} during {title}."
+    if walk_state == "guarding":
+        return f"Standing calm, reflective guard along the edge of {where}."
+    if mode == "DEEP_FOCUS":
+        return f"Focused intently along the living paths of {where}."
+    return f"Strolling along the starlight paths of {where}, keeping gentle watch."
+
+
 def _being_from_snapshot(
     body_id: str,
     snap: dict[str, Any],
@@ -461,11 +591,18 @@ def _being_from_snapshot(
     zone: str = "hub",
     memory_mb: float | None = None,
     live_organs: dict[str, Any] | None = None,
+    world_body: dict[str, Any] | None = None,
+    zones_map: dict[str, Any] | None = None,
+    world_tick: int = 0,
+    competition: dict[str, Any] | None = None,
+    slot_index: int = 0,
+    slot_total: int = 1,
 ) -> dict[str, Any]:
     cells = snap.get("cells", {})
     verifier = cells.get("action.verifier", {}).get("memory", {})
     soul_raw = verifier.get("soul") or Soul.create(body_id, calling=role).to_dict()
     char_raw = verifier.get("character") or Character.for_role(role).to_dict()
+    anat_raw = verifier.get("anatomy") or Anatomy.for_role(role).to_dict()
     beliefs_raw = verifier.get("beliefs", {})
     karma = round(float(verifier.get("karma", 0.0)), 3)
 
@@ -473,6 +610,20 @@ def _being_from_snapshot(
     fuel_pct = round(max(0.0, min(100.0, float(hormones.get("fuel", 1.0)) * 100.0)), 1)
     stress = round(max(0.0, min(1.0, float(hormones.get("stress", 0.0)))), 3)
     mode = str(snap.get("operating_mode", "ALERT"))
+    wb = world_body or {}
+    walk_state = _resolve_walk_state(mode, zone, wb, world_tick, competition)
+    home_info = _home_info_for(zone, wb.get("home"))
+    location = _compute_being_location(
+        body_id, zone, walk_state, home_info, zones_map or {}, slot_index, slot_total, wb, world_tick,
+    )
+
+    anatomy = Anatomy.from_dict(anat_raw).to_dict()
+    if walk_state == "resting_home":
+        for part in ("eyes", "tongue", "hands", "legs"):
+            anatomy[part]["active"] = False
+        anatomy["ears"]["active"] = True
+    elif walk_state == "guarding":
+        anatomy["legs"]["active"] = False
 
     belief_items = []
     for prop, bdata in sorted(beliefs_raw.items()):
@@ -484,10 +635,11 @@ def _being_from_snapshot(
             "evidence": int(bdata.get("evidence", 0)),
         })
 
+    name = being_display_name(body_id, role)
     organs = _build_organs_from_snapshot(snap, {"organs": live_organs} if live_organs else None)
     return {
         "id": body_id,
-        "name": being_display_name(body_id, role),
+        "name": name,
         "role": role,
         "zone": zone,
         "mode": mode,
@@ -506,6 +658,13 @@ def _being_from_snapshot(
             "diligence": round(float(char_raw.get("diligence", 0.80)), 3),
             "altruism": round(float(char_raw.get("altruism", 0.75)), 3),
         },
+        "anatomy": anatomy,
+        "home": {"id": home_info["id"], "name": home_info["name"], "zone": home_info["zone"]},
+        "location": location,
+        "honor": int(wb.get("honor", 0)),
+        "rewards": int(wb.get("rewards", 0)),
+        "punishments": int(wb.get("punishments", 0)),
+        "action_story": _action_story_for(name, zone, walk_state, home_info["name"], mode, competition),
         "beliefs": belief_items,
         "organs": organs,
         "memory_mb": memory_mb,
@@ -566,6 +725,25 @@ def _story_from_world_events(events: list[dict[str, Any]], entities_by_id: dict[
             who = "The Horizon"
             sentence = f"An older ripple in {where} faded softly back into stillness."
             tone = "dream"
+        elif etype == "reward":
+            reason = str(ev.get("reason", "graceful stewardship"))
+            sentence = f"{who} received golden honor in {where} for {reason}."
+            tone = "warm"
+        elif etype == "punishment":
+            reason = str(ev.get("reason", "stepping beyond gentle bounds"))
+            sentence = f"{who} paused for quiet reflection in {where} after {reason}."
+            tone = "alert"
+        elif etype == "competition_start":
+            title = str(ev.get("title", "Starlight Harmony Trial"))
+            who = "Starlight Playground"
+            sentence = f"{title} opened in {where}, inviting companions to gather and shine."
+            tone = "curious"
+        elif etype == "competition_end":
+            title = str(ev.get("title", "Starlight Harmony Trial"))
+            winner = being_display_name(str(ev.get("winner", "")))
+            who = winner or "Starlight Playground"
+            sentence = f"{winner} shone brightest as {title} concluded in {where}."
+            tone = "warm"
         if sentence:
             beats.append({
                 "id": f"w-{tick}-{idx}-{etype}",
@@ -636,6 +814,7 @@ class _DemoBeing:
         self.genome = Genome(identity=body_id, role=role)
         self.soul = Soul.create(body_id, calling=role, seed="sanctuary")
         self.character = Character.for_role(role)
+        self.anatomy = Anatomy.for_role(role)
         world.enter(body_id, role=role, zone=zone)
 
         def _on_action(verb: str, payload: dict[str, Any]) -> None:
@@ -649,6 +828,7 @@ class _DemoBeing:
             ledger=self.ledger,
             soul=self.soul,
             character=self.character,
+            anatomy=self.anatomy,
         )
         self.host = Host(world=world, body_id=body_id, issues_per_tick=3)
         self.trace_history: list[dict[str, Any]] = []
@@ -706,16 +886,8 @@ class ObservatoryBackend:
 
     def _init_demo_cosmos(self) -> None:
         world = SharedWorld()
-        roster = (
-            ("bb-alpha-sentinel", "sentinel", "alpha-sector"),
-            ("bb-alpha-triage", "triage", "alpha-sector"),
-            ("bb-alpha-planner", "planner", "hub"),
-            ("bb-beta-auditor", "auditor", "beta-sector"),
-            ("bb-beta-executor", "executor", "beta-sector"),
-            ("bb-frontier-scout", "general", "frontier"),
-        )
         beings: dict[str, _DemoBeing] = {}
-        for bid, role, zone in roster:
+        for bid, role, zone in DEMO_ROSTER:
             beings[bid] = _DemoBeing(bid, role, zone, world)
 
         for spark in SEED_SPARKS:
@@ -735,14 +907,18 @@ class ObservatoryBackend:
         for step_i in range(12):
             world.step(1)
             for bid, b in beings.items():
-                # Keep one companion calm long enough to enter SLEEP_REM dreaming naturally
-                if bid == "bb-alpha-planner" and step_i < 11:
+                # Keep Beta Planner calm long enough to enter SLEEP_REM dreaming inside its Home
+                if bid == "bb-beta-planner" and step_i < 11:
                     b.kernel.step()
                     drained = b.kernel.drain_trace()
                     if drained:
                         b.trace_history.extend(drained)
                 else:
                     b.step()
+
+        world.award_reward("bb-alpha-triage", honor=1, reason="welcomed the first morning wonder")
+        world.start_competition("Starlight Harmony Trial", kind="harmony_trial", duration=14)
+        world.step(1)
 
     def start_background_loop(self) -> None:
         if self.source_mode != "demo" or self._sim_thread is not None:
@@ -772,13 +948,19 @@ class ObservatoryBackend:
             world = self._demo_world
             tick = world.step(1)
 
-            # Occasionally invite the scout or planner to wander along neighboring light bridges
-            if tick % 7 == 0 and "bb-frontier-scout" in self._demo_beings:
-                cur = world.bodies["bb-frontier-scout"]["zone"]
-                neighbors = world.zones[cur].neighbors
-                if neighbors:
-                    target = neighbors[tick % len(neighbors)]
-                    world.move("bb-frontier-scout", target)
+            # Occasionally invite mobile scouts/weavers to cross luminous doors
+            if tick % 5 == 0:
+                traveler_id = "bb-gamma-scout" if tick % 10 == 0 else "bb-gamma-weaver"
+                if traveler_id in self._demo_beings:
+                    cur = world.bodies[traveler_id]["zone"]
+                    neighbors = world.zones[cur].neighbors
+                    if neighbors:
+                        target = neighbors[tick % len(neighbors)]
+                        world.move(traveler_id, target)
+
+            # Periodically launch a fresh friendly trial in Starlight Playground once an older one concludes
+            if tick % 18 == 0 and (not world.competition or world.competition.get("status") != "active"):
+                world.start_competition("Harmony Trial", kind="harmony_trial", duration=12)
 
             # Keep the cosmos softly alive if few open sparks remain
             open_count = sum(1 for e in world.entities.values() if e.state == "open")
@@ -817,8 +999,9 @@ class ObservatoryBackend:
                 continue
         return summary, entities_by_id
 
-    def _read_local_beings(self, world_bodies: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
-        beings: list[dict[str, Any]] = []
+    def _read_local_beings(self, summary: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+        world_bodies = summary.get("bodies", {})
+        raw_records: list[dict[str, Any]] = []
         traces: dict[str, list[dict[str, Any]]] = {}
         claimed_ids: set[str] = set()
         for sdir in self.state_dirs:
@@ -845,16 +1028,17 @@ class ObservatoryBackend:
             claimed_ids.add(body_id)
             wb = world_bodies.get(body_id, {})
             zone = str(wb.get("zone") or cfg.get("world_zone") or "hub")
-            beings.append(_being_from_snapshot(body_id, snap, role=role, zone=zone))
+            raw_records.append({"id": body_id, "snap": snap, "role": role, "zone": zone, "wb": wb})
             traces[body_id] = sd.read_trace()[-25:]
-        return beings, traces
+        return self._hydrate_beings(raw_records, summary), traces
 
-    def _read_incus_beings(self, world_bodies: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    def _read_incus_beings(self, summary: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+        world_bodies = summary.get("bodies", {})
         now = time.monotonic()
         if now - self._incus_cache_ts < 2.0 and self._incus_cache_beings:
-            return list(self._incus_cache_beings), dict(self._incus_cache_traces)
+            return self._hydrate_beings(self._incus_cache_beings, summary, world_bodies), dict(self._incus_cache_traces)
 
-        beings: list[dict[str, Any]] = []
+        raw_records: list[dict[str, Any]] = []
         traces: dict[str, list[dict[str, Any]]] = {}
         try:
             res = subprocess.run(
@@ -862,10 +1046,10 @@ class ObservatoryBackend:
                 stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3.0, check=False,
             )
             if res.returncode != 0 or not res.stdout.strip():
-                return beings, traces
+                return [], traces
             containers = json.loads(res.stdout)
         except Exception:
-            return beings, traces
+            return [], traces
 
         for c in containers:
             cname = str(c.get("name", ""))
@@ -912,13 +1096,50 @@ class ObservatoryBackend:
             wb = world_bodies.get(body_id) or world_bodies.get(f"body-{role}") or {}
             default_zone = f"{tier}-sector" if f"{tier}-sector" in ZONE_LABELS else "hub"
             zone = str(wb.get("zone") or cfg.get("world_zone") or default_zone)
-            beings.append(_being_from_snapshot(body_id, snap, role=str(cfg.get("role", role)), zone=zone, memory_mb=mem_mb))
+            raw_records.append({
+                "id": body_id, "snap": snap, "role": str(cfg.get("role", role)),
+                "zone": zone, "memory_mb": mem_mb, "wb": wb,
+            })
             traces[body_id] = trace_lines
 
         self._incus_cache_ts = now
-        self._incus_cache_beings = list(beings)
+        self._incus_cache_beings = list(raw_records)
         self._incus_cache_traces = dict(traces)
-        return beings, traces
+        return self._hydrate_beings(raw_records, summary, world_bodies), traces
+
+    @staticmethod
+    def _hydrate_beings(
+        raw_records: list[dict[str, Any]],
+        summary: dict[str, Any],
+        world_bodies: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
+        zones_map = summary.get("zones", {})
+        tick = int(summary.get("tick", 0))
+        comp = summary.get("competition")
+        zone_groups: dict[str, list[str]] = {}
+        for rec in raw_records:
+            zone_groups.setdefault(rec["zone"], []).append(rec["id"])
+        out: list[dict[str, Any]] = []
+        for rec in raw_records:
+            bid = rec["id"]
+            z = rec["zone"]
+            peers = zone_groups.get(z, [bid])
+            wb = (world_bodies or {}).get(bid) or rec.get("wb") or {}
+            out.append(_being_from_snapshot(
+                bid,
+                rec["snap"],
+                role=rec["role"],
+                zone=z,
+                memory_mb=rec.get("memory_mb"),
+                live_organs=rec.get("live_organs"),
+                world_body=wb,
+                zones_map=zones_map,
+                world_tick=tick,
+                competition=comp,
+                slot_index=peers.index(bid),
+                slot_total=len(peers),
+            ))
+        return out
 
     def _collect_world_and_beings(self) -> tuple[dict[str, Any], dict[str, dict[str, Any]], list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
         """Return (world_summary, entities_by_id, beings, traces_by_id)."""
@@ -926,15 +1147,19 @@ class ObservatoryBackend:
             w = self._demo_world
             summary = w.summary()
             entities_by_id = {eid: ent.to_dict() for eid, ent in sorted(w.entities.items())}
-            beings: list[dict[str, Any]] = []
+            raw_records: list[dict[str, Any]] = []
             traces: dict[str, list[dict[str, Any]]] = {}
             for bid, db in sorted(self._demo_beings.items()):
                 snap = db.kernel.snapshot()
-                zone = str(w.bodies.get(bid, {}).get("zone", db.initial_zone))
+                wb = w.bodies.get(bid, {})
+                zone = str(wb.get("zone", db.initial_zone))
                 live_orgs = {name: org.summary(db.kernel) for name, org in db.organs.items()}
-                beings.append(_being_from_snapshot(bid, snap, role=db.role, zone=zone, live_organs=live_orgs))
+                raw_records.append({
+                    "id": bid, "snap": snap, "role": db.role, "zone": zone,
+                    "live_organs": live_orgs, "wb": wb,
+                })
                 traces[bid] = list(db.trace_history[-25:])
-            return summary, entities_by_id, beings, traces
+            return summary, entities_by_id, self._hydrate_beings(raw_records, summary), traces
 
         summary: dict[str, Any] = {"tick": 0, "zones": {}, "bodies": {}, "recent_events": []}
         entities_by_id = {}
@@ -952,22 +1177,33 @@ class ObservatoryBackend:
 
         world_bodies = summary.get("bodies", {})
         if self.source_mode == "incus":
-            beings, traces = self._read_incus_beings(world_bodies)
-            # If Incus returned nothing (e.g. host without containers yet), fall back to world_bodies
+            beings, traces = self._read_incus_beings(summary)
             if not beings and world_bodies:
-                beings = [
-                    _being_from_snapshot(bid, {"tick": summary.get("tick", 0), "cells": {}, "hormones": {}, "operating_mode": "ALERT"},
-                                         role=str(b.get("role", "general")), zone=str(b.get("zone", "hub")))
+                raw = [
+                    {
+                        "id": bid,
+                        "snap": {"tick": summary.get("tick", 0), "cells": {}, "hormones": {}, "operating_mode": "ALERT"},
+                        "role": str(b.get("role", "general")),
+                        "zone": str(b.get("zone", "hub")),
+                        "wb": b,
+                    }
                     for bid, b in sorted(world_bodies.items())
                 ]
+                beings = self._hydrate_beings(raw, summary)
         else:
-            beings, traces = self._read_local_beings(world_bodies)
+            beings, traces = self._read_local_beings(summary)
             if not beings and world_bodies:
-                beings = [
-                    _being_from_snapshot(bid, {"tick": summary.get("tick", 0), "cells": {}, "hormones": {}, "operating_mode": "ALERT"},
-                                         role=str(b.get("role", "general")), zone=str(b.get("zone", "hub")))
+                raw = [
+                    {
+                        "id": bid,
+                        "snap": {"tick": summary.get("tick", 0), "cells": {}, "hormones": {}, "operating_mode": "ALERT"},
+                        "role": str(b.get("role", "general")),
+                        "zone": str(b.get("zone", "hub")),
+                        "wb": b,
+                    }
                     for bid, b in sorted(world_bodies.items())
                 ]
+                beings = self._hydrate_beings(raw, summary)
         return summary, entities_by_id, beings, traces
 
     # ------------------------------------------------------------------- Public API Builders
@@ -984,10 +1220,12 @@ class ObservatoryBackend:
                 res_counts[z] = res_counts.get(z, 0) + 1
 
             zones_out: list[dict[str, Any]] = []
+            zone_lookup: dict[str, dict[str, Any]] = {}
             raw_zones = summary.get("zones", {})
             for zname, zdata in raw_zones.items():
                 epct, calm, mood, story = _describe_zone(zdata, res_counts.get(zname, 0))
-                zones_out.append({
+                defaults = _ZONE_COORDS.get(zname, (0.0, 0.0, 8.0, 130.0))
+                z_out = {
                     "name": zname,
                     "label": zone_label(zname),
                     "neighbors": list(zdata.get("neighbors", [])),
@@ -999,7 +1237,15 @@ class ObservatoryBackend:
                     "calmness": calm,
                     "mood": mood,
                     "story": story,
-                })
+                    "x": round(float(zdata.get("x", defaults[0])), 2),
+                    "y": round(float(zdata.get("y", defaults[1])), 2),
+                    "z": round(float(zdata.get("z", defaults[2])), 2),
+                    "radius": round(float(zdata.get("radius", defaults[3])), 2),
+                }
+                zones_out.append(z_out)
+                zone_lookup[zname] = z_out
+
+            places = self._enrich_places(summary, zone_lookup, beings, tick)
 
             # Entities
             entities_out: list[dict[str, Any]] = []
@@ -1039,13 +1285,204 @@ class ObservatoryBackend:
                     "tick": tick,
                     "zones": zones_out,
                     "entities": entities_out,
+                    "lands": places["lands"],
+                    "homes": places["homes"],
+                    "playgrounds": places["playgrounds"],
+                    "paths": places["paths"],
+                    "doors": places["doors"],
+                    "competition": places["competition"],
                 },
                 "beings": beings,
+                "rewards_log": places["rewards_log"],
                 "chronicle": {
                     "chapters": list(CHRONICLE_CHAPTERS),
                     "events": events,
                 },
             }
+
+    @staticmethod
+    def _enrich_places(
+        summary: dict[str, Any],
+        zone_lookup: dict[str, dict[str, Any]],
+        beings: list[dict[str, Any]],
+        tick: int,
+    ) -> dict[str, Any]:
+        names_by_id = {b["id"]: b["name"] for b in beings}
+        lands = []
+        for z in zone_lookup.values():
+            lands.append({
+                "id": f"land:{z['name']}",
+                "zone": z["name"],
+                "name": z["label"],
+                "label": z["label"],
+                "x": z["x"],
+                "y": z["y"],
+                "z": z["z"],
+                "radius": z["radius"],
+                "elevation": z["z"],
+                "mood": z["mood"],
+                "energy_pct": z["energy_pct"],
+                "calmness": z["calmness"],
+                "story": z["story"],
+            })
+
+        homes_raw = summary.get("homes")
+        if not homes_raw:
+            homes_raw = []
+            for zname, (hid, hname, (hx, hy, hz)) in sorted(_HOME_META.items()):
+                if zname in zone_lookup:
+                    homes_raw.append({
+                        "id": hid, "name": hname, "zone": zname, "x": hx, "y": hy, "z": hz,
+                        "residents": [b["id"] for b in beings if b["home"]["id"] == hid],
+                    })
+        homes = []
+        for h in homes_raw:
+            res_ids = list(h.get("residents", []))
+            resting = sum(1 for b in beings if b["id"] in res_ids and b["location"]["walk_state"] == "resting_home")
+            zlabel = zone_label(str(h.get("zone", "hub")))
+            story = (
+                f"{h['name']} in {zlabel} glows softly as {resting} companion{'s' if resting != 1 else ''} rest inside."
+                if resting > 0
+                else f"{h['name']} keeps a warm lantern lit in {zlabel} for {len(res_ids)} resident{'s' if len(res_ids) != 1 else ''}."
+            )
+            homes.append({**h, "warmth": 0.9 if resting else 0.7, "story": story})
+
+        comp_raw = summary.get("competition")
+        comp_out = None
+        if isinstance(comp_raw, dict):
+            scores = comp_raw.get("scores", {})
+            leaderboard = [
+                {
+                    "id": bid,
+                    "name": names_by_id.get(bid, being_display_name(bid)),
+                    "score": round(float(sc), 2),
+                }
+                for bid, sc in sorted(scores.items(), key=lambda kv: (-float(kv[1]), kv[0]))
+            ]
+            winner = comp_raw.get("winner")
+            winner_name = names_by_id.get(winner, being_display_name(winner)) if winner else None
+            active = comp_raw.get("status") == "active"
+            story = (
+                f"{comp_raw['title']} is alive in {zone_label(comp_raw.get('zone', 'playground'))}, with {len(leaderboard)} companions shining together."
+                if active
+                else f"{winner_name or 'A companion'} earned joyful honor in {comp_raw['title']}."
+            )
+            comp_out = {
+                **comp_raw,
+                "active": active,
+                "leaderboard": leaderboard[:6],
+                "winner_name": winner_name,
+                "story": story,
+            }
+
+        playgrounds_raw = summary.get("playgrounds")
+        if not playgrounds_raw and "playground" in zone_lookup:
+            pz = zone_lookup["playground"]
+            playgrounds_raw = [{
+                "id": "starlight-arena", "name": "Starlight Arena", "zone": "playground",
+                "x": pz["x"], "y": pz["y"], "z": pz["z"], "radius": 105.0,
+                "active": bool(comp_out and comp_out["active"]),
+            }]
+        playgrounds = [
+            {
+                **pg,
+                "story": (
+                    f"{pg['name']} shimmers with friendly energy during {comp_out['title']}."
+                    if comp_out and comp_out["active"]
+                    else f"{pg['name']} rests beneath open starlight, ready for the next friendly trial."
+                ),
+            }
+            for pg in (playgrounds_raw or [])
+        ]
+
+        doors_raw = summary.get("doors")
+        if not doors_raw:
+            zones_objs = {
+                zn: Zone(zn, neighbors=tuple(zd["neighbors"]), x=zd["x"], y=zd["y"], z=zd["z"], radius=zd["radius"])
+                for zn, zd in zone_lookup.items()
+            }
+            doors_raw = list(_build_doors(zones_objs).values())
+
+        doors = []
+        for d in doors_raw:
+            za_lbl = zone_label(str(d["zone_a"]))
+            zb_lbl = zone_label(str(d["zone_b"]))
+            last_t = d.get("last_crossed_tick")
+            recent_flash = last_t is not None and (tick - int(last_t)) <= 3
+            crosser = d.get("last_crosser")
+            crosser_name = names_by_id.get(crosser, being_display_name(crosser)) if crosser else None
+            dname = f"{za_lbl.split()[0]}–{zb_lbl.split()[0]} Arch"
+            if d.get("state") == "guarded":
+                story = f"The {dname} doorway stands quietly guarded for a moment of reflection."
+            elif crosser_name:
+                story = f"Luminous {dname} doorway connects {za_lbl} and {zb_lbl}; {crosser_name} crossed recently."
+            else:
+                story = f"Luminous {dname} doorway stands open between {za_lbl} and {zb_lbl}."
+            doors.append({
+                **d,
+                "name": dname,
+                "recent_flash": recent_flash,
+                "last_crosser_name": crosser_name,
+                "story": story,
+            })
+
+        paths_raw = summary.get("paths")
+        if not paths_raw:
+            paths_raw = []
+            for d in doors:
+                za = zone_lookup.get(d["zone_a"])
+                zb = zone_lookup.get(d["zone_b"])
+                if za and zb:
+                    paths_raw.append({
+                        "id": f"path:{d['zone_a']}:{d['zone_b']}",
+                        "from_zone": d["zone_a"],
+                        "to_zone": d["zone_b"],
+                        "from_pos": {"x": za["x"], "y": za["y"], "z": za["z"]},
+                        "to_pos": {"x": zb["x"], "y": zb["y"], "z": zb["z"]},
+                        "door_id": d["id"],
+                    })
+        paths = [
+            {
+                **p,
+                "story": f"Stepping-stone light trail between {zone_label(p['from_zone'])} and {zone_label(p['to_zone'])}.",
+            }
+            for p in paths_raw
+        ]
+
+        rewards_raw = summary.get("rewards_log", [])
+        rewards_out = []
+        for r in rewards_raw[-20:]:
+            bid = str(r.get("body_id", ""))
+            who = names_by_id.get(bid, being_display_name(bid))
+            where = zone_label(str(r.get("zone", "hub")))
+            reason = str(r.get("reason", "graceful stewardship"))
+            rkind = str(r.get("kind", "reward"))
+            sentence = (
+                f"{who} earned golden honor in {where} for {reason}."
+                if rkind == "reward"
+                else f"{who} paused for gentle reflection in {where} after {reason}."
+            )
+            rewards_out.append({
+                "id": str(r.get("id", "")),
+                "tick": int(r.get("tick", tick)),
+                "kind": rkind,
+                "body_id": bid,
+                "who": who,
+                "where": where,
+                "amount": int(r.get("amount", 1)),
+                "reason": reason,
+                "sentence": sentence,
+            })
+
+        return {
+            "lands": lands,
+            "homes": homes,
+            "playgrounds": playgrounds,
+            "paths": paths,
+            "doors": doors,
+            "competition": comp_out,
+            "rewards_log": rewards_out,
+        }
 
     @staticmethod
     def _compose_narrative(
@@ -1168,6 +1605,10 @@ class ObservatoryBackend:
                 "planner": "to weave distant possibilities into calm pathways",
                 "auditor": "to trace every action with truth and gentle integrity",
                 "executor": "to carry helpful deeds steadily through to completion",
+                "scout": "to explore distant trails and bring warm tidings home",
+                "artisan": "to shape passing sparks into thoughtful, lasting craft",
+                "arbiter": "to preside with fairness and celebrate shared harmony",
+                "weaver": "to connect companions across doors with living threads",
                 "general": "to wander thoughtfully and tend whatever needs a gentle hand",
             }
             raw_calling = str(target["soul"]["calling"])
@@ -1185,6 +1626,12 @@ class ObservatoryBackend:
                     "conscience_phrases": conscience_phrases,
                 },
                 "character": target["character"],
+                "anatomy": target["anatomy"],
+                "home": target["home"],
+                "location": target["location"],
+                "honor": target["honor"],
+                "rewards": target["rewards"],
+                "punishments": target["punishments"],
                 "beliefs": beliefs_out,
                 "organs": target["organs"],
                 "voice_intro": voice_intro,
@@ -1230,19 +1677,193 @@ class ObservatoryBackend:
             observables=observables,
         )
 
-    def pulse(self, *, zone: str = "alpha-sector", spark: str, kind: str = "curiosity") -> dict[str, Any]:
-        cleaned_spark = spark.strip()
-        if not cleaned_spark:
-            raise ValueError("Please share a spark or thought before sending it into the world.")
-        cleaned_kind = kind.strip().lower()
-        if cleaned_kind not in ("curiosity", "incident"):
-            raise ValueError("Spark kind must be either 'curiosity' or 'incident'.")
+    @staticmethod
+    def _next_step_toward(zones: dict[str, Any], start: str, goal: str) -> str | None:
+        if start == goal or start not in zones or goal not in zones:
+            return None
+        q = deque([(start, [start])])
+        seen = {start}
+        while q:
+            cur, path = q.popleft()
+            zobj = zones[cur]
+            neighbors = zobj.neighbors if hasattr(zobj, "neighbors") else zobj.get("neighbors", ())
+            for nb in neighbors:
+                if nb == goal:
+                    return path[1] if len(path) > 1 else nb
+                if nb not in seen and nb in zones:
+                    seen.add(nb)
+                    q.append((nb, path + [nb]))
+        return None
 
-        prefix = "[question]" if cleaned_kind == "curiosity" else "[bug]"
-        title = cleaned_spark if cleaned_spark.startswith("[") else f"{prefix} {cleaned_spark}"
-        risk = 0.08 if cleaned_kind == "curiosity" else 0.35
+    def _resolve_target_body(
+        self, bodies: dict[str, Any], *, body_id: str | None = None, zone: str = "alpha-sector",
+    ) -> str | None:
+        if body_id and body_id in bodies:
+            return body_id
+        for bid, binfo in sorted(bodies.items()):
+            if binfo.get("zone") == zone:
+                return bid
+        return next(iter(sorted(bodies)), None)
+
+    def pulse(
+        self,
+        *,
+        zone: str = "alpha-sector",
+        spark: str = "",
+        kind: str = "curiosity",
+        body_id: str | None = None,
+        target_zone: str | None = None,
+    ) -> dict[str, Any]:
+        cleaned_kind = kind.strip().lower()
+        allowed_kinds = ("curiosity", "incident", "competition", "reward", "punishment", "move")
+        if cleaned_kind not in allowed_kinds:
+            raise ValueError(f"Spark kind must be one of {', '.join(allowed_kinds)}.")
+
+        cleaned_spark = spark.strip()
+        if cleaned_kind in ("curiosity", "incident") and not cleaned_spark:
+            raise ValueError("Please share a spark or thought before sending it into the world.")
 
         with self.lock:
+            if cleaned_kind == "competition":
+                title = cleaned_spark or "Starlight Harmony Trial"
+                trial_kind = "triage_race" if "race" in title.lower() else "harmony_trial"
+                if self.source_mode == "demo" and self._demo_world is not None:
+                    comp = self._demo_world.start_competition(title, kind=trial_kind, duration=12)
+                    self._demo_world.step(1)
+                    tick = self._demo_world.tick
+                elif self.world_url:
+                    client = WorldClient(self.world_url, timeout=2.5)
+                    comp = client.start_competition(title, kind=trial_kind)
+                    tick = int(client.summary().get("tick", 0))
+                else:
+                    w = SharedWorld(state_path=self.world_state_path)
+                    comp = w.start_competition(title, kind=trial_kind, duration=12)
+                    tick = w.tick
+                return {
+                    "ok": True,
+                    "kind": "competition",
+                    "acknowledgment": f"\"{comp['title']}\" has opened in Starlight Playground! Companions are gathering to shine together.",
+                    "spoken_reply": f"A new friendly trial, {comp['title']}, has begun in Starlight Playground.",
+                    "competition": comp,
+                    "world_tick": tick,
+                }
+
+            if cleaned_kind in ("reward", "punishment"):
+                reason = cleaned_spark or ("graceful stewardship" if cleaned_kind == "reward" else "stepping beyond gentle bounds")
+                if self.source_mode == "demo" and self._demo_world is not None:
+                    w = self._demo_world
+                    bid = self._resolve_target_body(w.bodies, body_id=body_id, zone=zone)
+                    if not bid:
+                        raise ValueError("No inhabitants are present to receive this action.")
+                    res = (
+                        w.award_reward(bid, honor=1, reason=reason)
+                        if cleaned_kind == "reward"
+                        else w.apply_punishment(bid, penalty=1, reason=reason, guard_door=True)
+                    )
+                    tick = w.tick
+                    who = being_display_name(bid)
+                elif self.world_url:
+                    client = WorldClient(self.world_url, timeout=2.5)
+                    summary = client.summary()
+                    bid = self._resolve_target_body(summary.get("bodies", {}), body_id=body_id, zone=zone)
+                    if not bid:
+                        raise ValueError("No inhabitants are present to receive this action.")
+                    res = (
+                        client.award_reward(bid, honor=1, reason=reason)
+                        if cleaned_kind == "reward"
+                        else client.apply_punishment(bid, penalty=1, reason=reason, guard_door=True)
+                    )
+                    tick = int(summary.get("tick", 0))
+                    who = being_display_name(bid)
+                else:
+                    w = SharedWorld(state_path=self.world_state_path)
+                    bid = self._resolve_target_body(w.bodies, body_id=body_id, zone=zone)
+                    if not bid:
+                        raise ValueError("No inhabitants are present to receive this action.")
+                    res = (
+                        w.award_reward(bid, honor=1, reason=reason)
+                        if cleaned_kind == "reward"
+                        else w.apply_punishment(bid, penalty=1, reason=reason, guard_door=True)
+                    )
+                    tick = w.tick
+                    who = being_display_name(bid)
+
+                ack = (
+                    f"{who} received golden honor for {reason}."
+                    if cleaned_kind == "reward"
+                    else f"{who} paused for gentle reflection after {reason}."
+                )
+                return {
+                    "ok": True,
+                    "kind": cleaned_kind,
+                    "acknowledgment": ack,
+                    "spoken_reply": ack,
+                    "result": res,
+                    "world_tick": tick,
+                }
+
+            if cleaned_kind == "move":
+                dest = target_zone or zone
+                if self.source_mode == "demo" and self._demo_world is not None:
+                    w = self._demo_world
+                    if dest not in w.zones:
+                        raise ValueError(f"Unknown habitat '{dest}'.")
+                    bid = self._resolve_target_body(w.bodies, body_id=body_id, zone=zone)
+                    if not bid:
+                        raise ValueError("No inhabitants are present to journey.")
+                    cur = w.bodies[bid]["zone"]
+                    step_zone = dest if dest in w.zones[cur].neighbors else (self._next_step_toward(w.zones, cur, dest) or dest)
+                    move_res = w.move(bid, step_zone)
+                    tick = w.tick
+                    who = being_display_name(bid)
+                elif self.world_url:
+                    client = WorldClient(self.world_url, timeout=2.5)
+                    summary = client.summary()
+                    zones_map = summary.get("zones", {})
+                    if dest not in zones_map:
+                        raise ValueError(f"Unknown habitat '{dest}'.")
+                    bid = self._resolve_target_body(summary.get("bodies", {}), body_id=body_id, zone=zone)
+                    if not bid:
+                        raise ValueError("No inhabitants are present to journey.")
+                    cur = summary["bodies"][bid]["zone"]
+                    neighbors = zones_map[cur].get("neighbors", [])
+                    step_zone = dest if dest in neighbors else (self._next_step_toward(zones_map, cur, dest) or dest)
+                    move_res = client.move(bid, step_zone)
+                    tick = int(summary.get("tick", 0))
+                    who = being_display_name(bid)
+                else:
+                    w = SharedWorld(state_path=self.world_state_path)
+                    if dest not in w.zones:
+                        raise ValueError(f"Unknown habitat '{dest}'.")
+                    bid = self._resolve_target_body(w.bodies, body_id=body_id, zone=zone)
+                    if not bid:
+                        raise ValueError("No inhabitants are present to journey.")
+                    cur = w.bodies[bid]["zone"]
+                    step_zone = dest if dest in w.zones[cur].neighbors else (self._next_step_toward(w.zones, cur, dest) or dest)
+                    move_res = w.move(bid, step_zone)
+                    tick = w.tick
+                    who = being_display_name(bid)
+
+                if not move_res.get("moved"):
+                    reason = move_res.get("reason", "resting")
+                    raise ValueError(f"{who} could not cross right now ({reason}).")
+                where_dest = zone_label(str(move_res.get("zone", dest)))
+                ack = f"{who} stepped gracefully through the luminous doorway into {where_dest}."
+                return {
+                    "ok": True,
+                    "kind": "move",
+                    "acknowledgment": ack,
+                    "spoken_reply": ack,
+                    "moved_to": move_res.get("zone"),
+                    "door": move_res.get("door"),
+                    "world_tick": tick,
+                }
+
+            # Standard curiosity / incident spark
+            prefix = "[question]" if cleaned_kind == "curiosity" else "[bug]"
+            title = cleaned_spark if cleaned_spark.startswith("[") else f"{prefix} {cleaned_spark}"
+            risk = 0.08 if cleaned_kind == "curiosity" else 0.35
+
             if self.source_mode == "demo" and self._demo_world is not None:
                 if zone not in self._demo_world.zones:
                     raise ValueError(f"Unknown habitat '{zone}'.")
@@ -1254,7 +1875,6 @@ class ObservatoryBackend:
                     risk=risk,
                     ttl=80,
                 )
-                # Let organisms in the simulation sense and respond immediately
                 self._demo_world.step(1)
                 for db in self._demo_beings.values():
                     if db.world.bodies.get(db.body_id, {}).get("zone") == zone:
@@ -1320,6 +1940,7 @@ class ObservatoryBackend:
 
         return {
             "ok": True,
+            "kind": cleaned_kind,
             "acknowledgment": ack,
             "spoken_reply": spoken_reply,
             "entity": entity_out,
@@ -1413,7 +2034,15 @@ def make_observatory_server(
                 zone = str(body.get("zone") or "alpha-sector")
                 spark = str(body.get("spark") or body.get("title") or "")
                 kind = str(body.get("kind") or "curiosity")
-                result = backend.pulse(zone=zone, spark=spark, kind=kind)
+                body_id = body.get("body_id")
+                target_zone = body.get("target_zone")
+                result = backend.pulse(
+                    zone=zone,
+                    spark=spark,
+                    kind=kind,
+                    body_id=str(body_id) if body_id else None,
+                    target_zone=str(target_zone) if target_zone else None,
+                )
                 self._send_json(200, result)
             except (ValueError, json.JSONDecodeError) as exc:
                 self._send_json(400, {"ok": False, "error": str(exc)})

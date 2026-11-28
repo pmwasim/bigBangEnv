@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>The Living Cosmos — bigBangEnv Sanctuary</title>
   <link
     rel="icon"
@@ -19,10 +19,10 @@
     <div class="nebula-cloud nebula-c"></div>
   </div>
 
-  <!-- Full-viewport 60fps living biosphere canvas -->
-  <canvas id="biosphere-canvas" aria-label="Living Biosphere Sanctuary"></canvas>
+  <!-- Full-viewport 60fps interactive 3D living biosphere canvas -->
+  <canvas id="biosphere-canvas" aria-label="Interactive 3D Living Biosphere Sanctuary"></canvas>
 
-  <!-- Floating hover tooltip for organisms on canvas -->
+  <!-- Floating hover tooltip for organisms & places -->
   <div id="canvas-tooltip" class="canvas-tooltip hidden" role="status" aria-live="polite"></div>
 
   <!-- Sanctuary UI Layer -->
@@ -33,55 +33,24 @@
         <span id="pulse-beacon" class="pulse-beacon" aria-hidden="true"></span>
         <div class="brand-copy">
           <h1 class="brand-title">The Living Cosmos</h1>
-          <p id="world-breath" class="brand-subtitle">Awakening the sanctuary…</p>
+          <p id="world-breath" class="brand-subtitle">Awakening the 3D sanctuary…</p>
         </div>
       </div>
 
       <div class="top-actions">
         <!-- Prominent Voice & Sound Pill -->
-        <div class="voice-wrapper">
-          <button
-            id="voice-sound-btn"
-            class="glass-pill action-pill voice-pill"
-            type="button"
-            aria-expanded="false"
-            aria-controls="voice-popover"
-          >
-            <span class="voice-wave-icon" aria-hidden="true">
-              <i></i><i></i><i></i>
-            </span>
-            <span id="voice-pill-label">Voice &amp; Sound</span>
-          </button>
-
-          <div id="voice-popover" class="glass-card voice-popover hidden" role="dialog" aria-label="Voice and Ambient Sound">
-            <div class="popover-head">
-              <span class="popover-title">Sanctuary Voice &amp; Chimes</span>
-              <button id="voice-close-btn" class="icon-close" type="button" aria-label="Close voice controls">&times;</button>
-            </div>
-            <p class="popover-note">Let the cosmos speak new moments aloud and chime softly when sparks ripple across habitats.</p>
-
-            <div class="voice-toggles">
-              <button id="toggle-speech-btn" class="soft-toggle" type="button" aria-pressed="false">
-                <span class="toggle-dot"></span>
-                <span id="toggle-speech-text">Spoken Story: Quiet</span>
-              </button>
-              <button id="toggle-chimes-btn" class="soft-toggle" type="button" aria-pressed="false">
-                <span class="toggle-dot"></span>
-                <span id="toggle-chimes-text">Harmonic Chimes: Quiet</span>
-              </button>
-            </div>
-
-            <div class="voice-actions-row">
-              <button id="speak-now-btn" class="glow-btn" type="button">Speak Now</button>
-              <button id="mute-all-btn" class="ghost-btn" type="button">Silence All</button>
-            </div>
-
-            <label class="voice-picker-label" for="voice-select">Narrator Voice</label>
-            <select id="voice-select" class="voice-select">
-              <option value="">Natural Default Voice</option>
-            </select>
-          </div>
-        </div>
+        <button
+          id="voice-sound-btn"
+          class="glass-pill action-pill voice-pill"
+          type="button"
+          aria-expanded="false"
+          aria-controls="voice-popover"
+        >
+          <span class="voice-wave-icon" aria-hidden="true">
+            <i></i><i></i><i></i>
+          </span>
+          <span id="voice-pill-label">Voice &amp; Sound</span>
+        </button>
 
         <!-- Tapestry & History Trigger -->
         <button id="open-tapestry-btn" class="glass-pill action-pill tapestry-pill" type="button">
@@ -111,7 +80,54 @@
       </div>
     </header>
 
-    <!-- Host Sanctuary Vitality Expanded Card -->
+    <!-- Floating Camera Controls & Active Playground Competition Ribbon -->
+    <div class="mid-hud-row">
+      <div class="camera-controls glass-pill" role="toolbar" aria-label="3D Camera Controls">
+        <button id="cam-iso-btn" class="cam-btn active" type="button" data-cam="iso">Isometric 3D</button>
+        <button id="cam-arena-btn" class="cam-btn" type="button" data-cam="arena">Playground</button>
+        <button id="cam-follow-btn" class="cam-btn" type="button" data-cam="follow">Follow Being</button>
+        <span class="cam-divider" aria-hidden="true"></span>
+        <button id="cam-zoom-in" class="cam-zoom-btn" type="button" aria-label="Zoom in">+</button>
+        <button id="cam-zoom-out" class="cam-zoom-btn" type="button" aria-label="Zoom out">&minus;</button>
+      </div>
+
+      <div id="competition-banner" class="glass-pill competition-banner hidden" role="status" aria-live="polite">
+        <span class="pill-orb amber-orb" aria-hidden="true"></span>
+        <span id="competition-text">Playground Trial in progress</span>
+      </div>
+    </div>
+
+    <!-- Viewport-Clamped Voice & Sound Popover -->
+    <div id="voice-popover" class="glass-card voice-popover hidden" role="dialog" aria-label="Voice and Ambient Sound">
+      <div class="popover-head">
+        <span class="popover-title">Sanctuary Voice &amp; Chimes</span>
+        <button id="voice-close-btn" class="icon-close" type="button" aria-label="Close voice controls">&times;</button>
+      </div>
+      <p class="popover-note">Let the cosmos speak new moments aloud and chime softly when sparks ripple across lands, homes, and doors.</p>
+
+      <div class="voice-toggles">
+        <button id="toggle-speech-btn" class="soft-toggle" type="button" aria-pressed="false">
+          <span class="toggle-dot"></span>
+          <span id="toggle-speech-text">Spoken Story: Quiet</span>
+        </button>
+        <button id="toggle-chimes-btn" class="soft-toggle" type="button" aria-pressed="false">
+          <span class="toggle-dot"></span>
+          <span id="toggle-chimes-text">Harmonic Chimes: Quiet</span>
+        </button>
+      </div>
+
+      <div class="voice-actions-row">
+        <button id="speak-now-btn" class="glow-btn" type="button">Speak Now</button>
+        <button id="mute-all-btn" class="ghost-btn" type="button">Silence All</button>
+      </div>
+
+      <label class="voice-picker-label" for="voice-select">Narrator Voice</label>
+      <select id="voice-select" class="voice-select">
+        <option value="">Natural Default Voice</option>
+      </select>
+    </div>
+
+    <!-- Viewport-Clamped Host Sanctuary Vitality Expanded Card -->
     <aside id="vitality-popover" class="glass-card vitality-popover hidden" aria-label="Host Sanctuary Vitality">
       <div class="popover-head">
         <div>
@@ -153,14 +169,14 @@
       </div>
     </aside>
 
-    <!-- Being Quick Constellation Strip (floating left) -->
+    <!-- Being Quick Constellation Strip (floating left on desktop) -->
     <nav id="beings-strip" class="beings-strip" aria-label="Living Beings in the Sanctuary"></nav>
 
-    <!-- Bottom Floating Live Whisper + Send a Spark -->
+    <!-- Bottom Floating Live Whisper + Send a Spark / Start Trial -->
     <section class="whisper-dock" aria-label="What is happening now">
       <div class="glass-card whisper-card">
         <div class="whisper-header">
-          <span class="eyebrow-soft">What Is Happening Now</span>
+          <span class="eyebrow-soft">What Is Happening Now · Drag to Orbit 3D World</span>
           <span id="whisper-voice-state" class="whisper-voice-state">Quietly listening</span>
         </div>
         <h2 id="narrative-headline" class="narrative-headline">The biosphere breathes in stillness.</h2>
@@ -188,16 +204,17 @@
             placeholder="Whisper a thought into a habitat…"
           />
           <button id="spark-submit-btn" class="spark-submit-btn" type="submit">Send a Spark</button>
+          <button id="start-trial-btn" class="trial-btn" type="button" title="Begin a friendly Playground Trial">Start Trial</button>
         </form>
         <p id="spark-feedback" class="spark-feedback" role="status" aria-live="polite"></p>
       </div>
     </section>
 
-    <!-- Being Soul & Relative World Drawer (Right Side) -->
+    <!-- Being Soul, Embodied Anatomy & Relative World Drawer -->
     <aside
       id="being-drawer"
       class="glass-card being-drawer hidden"
-      aria-label="Being Soul and Inner World"
+      aria-label="Being Soul, Anatomy and Inner World"
     >
       <div class="drawer-header">
         <div class="drawer-identity">
@@ -213,10 +230,18 @@
 
       <div class="drawer-actions">
         <button id="hear-being-btn" class="glow-btn small-glow" type="button">Hear My Voice</button>
-        <span id="drawer-karma-pill" class="karma-pill">Karma Radiance</span>
+        <span id="drawer-karma-pill" class="karma-pill">Honor &amp; Karma</span>
       </div>
 
       <div class="drawer-scroll">
+        <!-- Embodied Anatomy & Life (Eyes, Ears, Tongue, Hands, Legs, Home, Honor, Rewards, Punishments) -->
+        <section class="drawer-section anatomy-section">
+          <h3 class="section-label">Embodied Anatomy &amp; Life</h3>
+          <p id="drawer-life-place" class="horizon-whisper"></p>
+          <div id="drawer-anatomy-list" class="anatomy-list"></div>
+          <div id="drawer-honor-ledger" class="honor-ledger"></div>
+        </section>
+
         <!-- First-person Soul reflection -->
         <section class="drawer-section soul-section">
           <h3 class="section-label">Soul &amp; Calling</h3>
@@ -267,12 +292,12 @@
         </div>
 
         <div id="panel-chapters" class="tapestry-body" role="tabpanel">
-          <p class="tapestry-intro">From the first spark of physics to organisms with memory, society, and inner worlds — every milestone woven into this living cosmos.</p>
+          <p class="tapestry-intro">From the first spark of physics to embodied creatures walking paths, crossing doors, and growing in inner life — every milestone woven into this cosmos.</p>
           <div id="chapters-timeline" class="chapters-timeline"></div>
         </div>
 
         <div id="panel-events" class="tapestry-body hidden" role="tabpanel">
-          <p class="tapestry-intro">Recent ripples, dreams, and quiet acts across all habitats, told as they unfold.</p>
+          <p class="tapestry-intro">Recent ripples, playground trials, rewards, homecomings, and quiet acts across every habitat.</p>
           <div id="events-chronicle" class="events-chronicle"></div>
         </div>
       </div>
