@@ -15,6 +15,7 @@ import threading
 import time
 import urllib.parse
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from typing import Any
 from .apps.caretaker import Host, Ledger
 from .apps.sensors import collect_host_snapshot
 from .body import Genome, build_body
+from .evolution import evolve_generation
 from .kernel import Kernel
 from .organ import Organ
 from .runtime import StateDir
@@ -744,6 +746,16 @@ def _story_from_world_events(events: list[dict[str, Any]], entities_by_id: dict[
             who = winner or "Starlight Playground"
             sentence = f"{winner} shone brightest as {title} concluded in {where}."
             tone = "warm"
+        elif etype == "door_toggle":
+            state = str(ev.get("state", "open"))
+            did = str(ev.get("door", "doorway"))
+            who = "The Gatekeeper"
+            sentence = (
+                f"The {did.replace('door:', '').replace(':', '–')} doorway gently closed for quiet guarding."
+                if state == "guarded"
+                else f"The {did.replace('door:', '').replace(':', '–')} doorway opened wide in warm welcome."
+            )
+            tone = "alert" if state == "guarded" else "calm"
         if sentence:
             beats.append({
                 "id": f"w-{tick}-{idx}-{etype}",
@@ -856,13 +868,16 @@ class ObservatoryBackend:
         incus: bool = False,
         demo: bool = False,
         sim_interval: float = 2.5,
+        incus_interval: float = 4.0,
     ) -> None:
         self.lock = threading.RLock()
+        self._cache_lock = threading.Lock()
         self.world_url = world_url.rstrip("/") if world_url else None
         self.world_state_path = Path(world_state_path) if world_state_path else None
         self.state_dirs = [Path(p) for p in (state_dirs or [])]
         self.incus = bool(incus)
         self.sim_interval = max(0.25, float(sim_interval))
+        self.incus_interval = max(0.5, float(incus_interval))
 
         # Auto-select demo mode if no external world, local state dirs, or incus flag are configured
         if demo or (not self.world_url and not self.state_dirs and not self.incus and not self.world_state_path):
@@ -878,8 +893,13 @@ class ObservatoryBackend:
         self._incus_cache_ts = 0.0
         self._incus_cache_beings: list[dict[str, Any]] = []
         self._incus_cache_traces: dict[str, list[dict[str, Any]]] = {}
+        self._incus_has_polled = False
+        self._machine_cache_ts = 0.0
+        self._machine_cache: dict[str, Any] | None = None
+        self._evolution_insights: list[dict[str, Any]] = []
         self._stop_event = threading.Event()
         self._sim_thread: threading.Thread | None = None
+        self._incus_poller_thread: threading.Thread | None = None
 
         if self.source_mode == "demo":
             self._init_demo_cosmos()
@@ -921,24 +941,38 @@ class ObservatoryBackend:
         world.step(1)
 
     def start_background_loop(self) -> None:
-        if self.source_mode != "demo" or self._sim_thread is not None:
-            return
+        if self.source_mode == "demo" and self._sim_thread is None:
+            def _loop() -> None:
+                while not self._stop_event.wait(self.sim_interval):
+                    try:
+                        self.step_simulation()
+                    except Exception:
+                        pass
 
-        def _loop() -> None:
-            while not self._stop_event.wait(self.sim_interval):
-                try:
-                    self.step_simulation()
-                except Exception:
-                    pass
+            self._sim_thread = threading.Thread(target=_loop, daemon=True, name="observatory-sim")
+            self._sim_thread.start()
 
-        self._sim_thread = threading.Thread(target=_loop, daemon=True, name="observatory-sim")
-        self._sim_thread.start()
+        if self.source_mode == "incus" and self._incus_poller_thread is None:
+            def _incus_poller() -> None:
+                while not self._stop_event.is_set():
+                    try:
+                        self.poll_incus_once()
+                    except Exception:
+                        pass
+                    if self._stop_event.wait(self.incus_interval):
+                        break
+
+            self._incus_poller_thread = threading.Thread(target=_incus_poller, daemon=True, name="observatory-incus-poller")
+            self._incus_poller_thread.start()
 
     def stop(self) -> None:
         self._stop_event.set()
         if self._sim_thread is not None:
             self._sim_thread.join(timeout=1.5)
             self._sim_thread = None
+        if self._incus_poller_thread is not None:
+            self._incus_poller_thread.join(timeout=2.0)
+            self._incus_poller_thread = None
 
     def step_simulation(self) -> None:
         """Advance the demo cosmos by one gentle heartbeat."""
@@ -947,20 +981,7 @@ class ObservatoryBackend:
                 return
             world = self._demo_world
             tick = world.step(1)
-
-            # Occasionally invite mobile scouts/weavers to cross luminous doors
-            if tick % 5 == 0:
-                traveler_id = "bb-gamma-scout" if tick % 10 == 0 else "bb-gamma-weaver"
-                if traveler_id in self._demo_beings:
-                    cur = world.bodies[traveler_id]["zone"]
-                    neighbors = world.zones[cur].neighbors
-                    if neighbors:
-                        target = neighbors[tick % len(neighbors)]
-                        world.move(traveler_id, target)
-
-            # Periodically launch a fresh friendly trial in Starlight Playground once an older one concludes
-            if tick % 18 == 0 and (not world.competition or world.competition.get("status") != "active"):
-                world.start_competition("Harmony Trial", kind="harmony_trial", duration=12)
+            world.choreograph()
 
             # Keep the cosmos softly alive if few open sparks remain
             open_count = sum(1 for e in world.entities.values() if e.state == "open")
@@ -1032,80 +1053,110 @@ class ObservatoryBackend:
             traces[body_id] = sd.read_trace()[-25:]
         return self._hydrate_beings(raw_records, summary), traces
 
-    def _read_incus_beings(self, summary: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
-        world_bodies = summary.get("bodies", {})
-        now = time.monotonic()
-        if now - self._incus_cache_ts < 2.0 and self._incus_cache_beings:
-            return self._hydrate_beings(self._incus_cache_beings, summary, world_bodies), dict(self._incus_cache_traces)
+    @staticmethod
+    def _inspect_incus_container(c: dict[str, Any], world_bodies: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
+        cname = str(c.get("name", ""))
+        if not cname.startswith("bb-"):
+            return None
+        parts = cname.split("-", 2)
+        tier = parts[1] if len(parts) > 1 else "alpha"
+        role = parts[2] if len(parts) > 2 else "general"
+        mem_bytes = ((c.get("state") or {}).get("memory") or {}).get("usage")
+        mem_mb = round(float(mem_bytes) / (1024 * 1024), 1) if isinstance(mem_bytes, (int, float)) else None
 
-        raw_records: list[dict[str, Any]] = []
-        traces: dict[str, list[dict[str, Any]]] = {}
+        snap: dict[str, Any] = {"tick": 0, "cells": {}, "hormones": {}, "operating_mode": "ALERT"}
+        cfg: dict[str, Any] = {}
+        trace_lines: list[dict[str, Any]] = []
+        if c.get("status") == "Running":
+            try:
+                raw = subprocess.run(
+                    [
+                        "incus", "exec", cname, "--",
+                        "bash", "-c",
+                        "cat /var/lib/bigbang/state/config.json 2>/dev/null; echo '---SPLIT---'; "
+                        "cat /var/lib/bigbang/state/snapshot.json 2>/dev/null; echo '---SPLIT---'; "
+                        "tail -n 20 /var/lib/bigbang/state/trace.jsonl 2>/dev/null || true",
+                    ],
+                    stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3.0, check=False,
+                )
+                if raw.returncode == 0 and "---SPLIT---" in raw.stdout:
+                    seg = raw.stdout.split("---SPLIT---", 2)
+                    if seg[0].strip():
+                        cfg = json.loads(seg[0].strip())
+                    if len(seg) > 1 and seg[1].strip():
+                        snap = json.loads(seg[1].strip())
+                    if len(seg) > 2 and seg[2].strip():
+                        for ln in seg[2].splitlines():
+                            if ln.strip():
+                                try:
+                                    trace_lines.append(json.loads(ln))
+                                except json.JSONDecodeError:
+                                    pass
+            except Exception:
+                pass
+
+        body_id = str(cfg.get("world_body_id") or cname)
+        wb = world_bodies.get(body_id) or world_bodies.get(f"body-{role}") or {}
+        default_zone = f"{tier}-sector" if f"{tier}-sector" in ZONE_LABELS else "hub"
+        zone = str(wb.get("zone") or cfg.get("world_zone") or default_zone)
+        rec = {
+            "id": body_id,
+            "snap": snap,
+            "role": str(cfg.get("role", role)),
+            "zone": zone,
+            "memory_mb": mem_mb,
+            "wb": wb,
+        }
+        return rec, trace_lines
+
+    def poll_incus_once(self, world_bodies: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+        """Query Incus containers in parallel and atomically update the in-memory cache."""
+        wb_map = world_bodies if world_bodies is not None else {}
+        if world_bodies is None and self.world_url:
+            try:
+                wb_map = WorldClient(self.world_url, timeout=1.5).summary().get("bodies", {})
+            except Exception:
+                wb_map = {}
         try:
             res = subprocess.run(
                 ["incus", "list", "--format", "json"],
                 stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3.0, check=False,
             )
-            if res.returncode != 0 or not res.stdout.strip():
-                return [], traces
-            containers = json.loads(res.stdout)
+            containers = json.loads(res.stdout) if (res.returncode == 0 and res.stdout.strip()) else []
         except Exception:
-            return [], traces
+            containers = []
 
-        for c in containers:
-            cname = str(c.get("name", ""))
-            if not cname.startswith("bb-"):
-                continue
-            parts = cname.split("-", 2)
-            tier = parts[1] if len(parts) > 1 else "alpha"
-            role = parts[2] if len(parts) > 2 else "general"
-            mem_bytes = ((c.get("state") or {}).get("memory") or {}).get("usage")
-            mem_mb = round(float(mem_bytes) / (1024 * 1024), 1) if isinstance(mem_bytes, (int, float)) else None
+        bb_containers = [c for c in containers if str(c.get("name", "")).startswith("bb-")]
+        raw_records: list[dict[str, Any]] = []
+        traces: dict[str, list[dict[str, Any]]] = {}
+        if bb_containers:
+            with ThreadPoolExecutor(max_workers=min(5, len(bb_containers))) as pool:
+                results = list(pool.map(lambda c: self._inspect_incus_container(c, wb_map), bb_containers))
+            for item in results:
+                if item is not None:
+                    rec, tlines = item
+                    raw_records.append(rec)
+                    traces[rec["id"]] = tlines
 
-            snap: dict[str, Any] = {"tick": 0, "cells": {}, "hormones": {}, "operating_mode": "ALERT"}
-            cfg: dict[str, Any] = {}
-            trace_lines: list[dict[str, Any]] = []
-            if c.get("status") == "Running":
-                try:
-                    raw = subprocess.run(
-                        [
-                            "incus", "exec", cname, "--",
-                            "bash", "-c",
-                            "cat /var/lib/bigbang/state/config.json 2>/dev/null; echo '---SPLIT---'; "
-                            "cat /var/lib/bigbang/state/snapshot.json 2>/dev/null; echo '---SPLIT---'; "
-                            "tail -n 20 /var/lib/bigbang/state/trace.jsonl 2>/dev/null || true",
-                        ],
-                        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=3.0, check=False,
-                    )
-                    if raw.returncode == 0 and "---SPLIT---" in raw.stdout:
-                        seg = raw.stdout.split("---SPLIT---", 2)
-                        if seg[0].strip():
-                            cfg = json.loads(seg[0].strip())
-                        if len(seg) > 1 and seg[1].strip():
-                            snap = json.loads(seg[1].strip())
-                        if len(seg) > 2 and seg[2].strip():
-                            for ln in seg[2].splitlines():
-                                if ln.strip():
-                                    try:
-                                        trace_lines.append(json.loads(ln))
-                                    except json.JSONDecodeError:
-                                        pass
-                except Exception:
-                    pass
+        with self._cache_lock:
+            self._incus_cache_ts = time.monotonic()
+            self._incus_cache_beings = list(raw_records)
+            self._incus_cache_traces = dict(traces)
+            self._incus_has_polled = True
+        return raw_records, traces
 
-            body_id = str(cfg.get("world_body_id") or cname)
-            wb = world_bodies.get(body_id) or world_bodies.get(f"body-{role}") or {}
-            default_zone = f"{tier}-sector" if f"{tier}-sector" in ZONE_LABELS else "hub"
-            zone = str(wb.get("zone") or cfg.get("world_zone") or default_zone)
-            raw_records.append({
-                "id": body_id, "snap": snap, "role": str(cfg.get("role", role)),
-                "zone": zone, "memory_mb": mem_mb, "wb": wb,
-            })
-            traces[body_id] = trace_lines
+    def _read_incus_beings(self, summary: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+        world_bodies = summary.get("bodies", {})
+        with self._cache_lock:
+            has_polled = self._incus_has_polled
+            cached_records = list(self._incus_cache_beings)
+            cached_traces = dict(self._incus_cache_traces)
 
-        self._incus_cache_ts = now
-        self._incus_cache_beings = list(raw_records)
-        self._incus_cache_traces = dict(traces)
-        return self._hydrate_beings(raw_records, summary, world_bodies), traces
+        # If background poller hasn't started (e.g., direct unit tests), populate cache once
+        if not has_polled and self._incus_poller_thread is None:
+            cached_records, cached_traces = self.poll_incus_once(world_bodies)
+
+        return self._hydrate_beings(cached_records, summary, world_bodies), cached_traces
 
     @staticmethod
     def _hydrate_beings(
@@ -1206,12 +1257,23 @@ class ObservatoryBackend:
                 beings = self._hydrate_beings(raw, summary)
         return summary, entities_by_id, beings, traces
 
+    def _get_cached_machine_stats(self) -> dict[str, Any]:
+        now = time.monotonic()
+        if self._machine_cache is not None and (now - self._machine_cache_ts) < 2.0:
+            return dict(self._machine_cache)
+        stats = collect_machine_stats()
+        self._machine_cache = stats
+        self._machine_cache_ts = now
+        return dict(stats)
+
     # ------------------------------------------------------------------- Public API Builders
     def get_universe(self) -> dict[str, Any]:
+        t0 = time.perf_counter()
         with self.lock:
             summary, entities_by_id, beings, traces = self._collect_world_and_beings()
-            machine = collect_machine_stats()
+            machine = self._get_cached_machine_stats()
             tick = int(summary.get("tick", 0))
+            daylight = round(0.5 + 0.5 * math.sin(tick * 0.08), 3)
 
             # Zones
             res_counts: dict[str, int] = {}
@@ -1271,11 +1333,13 @@ class ObservatoryBackend:
             # Chronicle
             events = _story_from_world_events(summary.get("recent_events", []), entities_by_id)
             events.extend(_story_from_body_traces(beings, traces))
+            events.extend(self._evolution_insights[-8:])
             events.sort(key=lambda item: (item["tick"], item["id"]))
             events = events[-24:]
 
             # Narrative
             narrative = self._compose_narrative(tick, zones_out, entities_out, beings, machine, events)
+            api_ms = round((time.perf_counter() - t0) * 1000.0, 2)
 
             return {
                 "source_mode": self.source_mode,
@@ -1283,6 +1347,7 @@ class ObservatoryBackend:
                 "machine": machine,
                 "world": {
                     "tick": tick,
+                    "daylight": daylight,
                     "zones": zones_out,
                     "entities": entities_out,
                     "lands": places["lands"],
@@ -1294,10 +1359,12 @@ class ObservatoryBackend:
                 },
                 "beings": beings,
                 "rewards_log": places["rewards_log"],
+                "evolution_insights": list(self._evolution_insights[-6:]),
                 "chronicle": {
                     "chapters": list(CHRONICLE_CHAPTERS),
                     "events": events,
                 },
+                "perf": {"api_ms": api_ms},
             }
 
     @staticmethod
@@ -1367,10 +1434,17 @@ class ObservatoryBackend:
                 if active
                 else f"{winner_name or 'A companion'} earned joyful honor in {comp_raw['title']}."
             )
+            podium = [
+                {**row, "rank": idx + 1}
+                for idx, row in enumerate(leaderboard[:3])
+            ]
+            ticks_remaining = max(0, int(comp_raw.get("ends_tick", tick)) - tick) if active else 0
             comp_out = {
                 **comp_raw,
                 "active": active,
+                "ticks_remaining": ticks_remaining,
                 "leaderboard": leaderboard[:6],
+                "podium": podium,
                 "winner_name": winner_name,
                 "story": story,
             }
@@ -1713,9 +1787,10 @@ class ObservatoryBackend:
         kind: str = "curiosity",
         body_id: str | None = None,
         target_zone: str | None = None,
+        door_id: str | None = None,
     ) -> dict[str, Any]:
         cleaned_kind = kind.strip().lower()
-        allowed_kinds = ("curiosity", "incident", "competition", "reward", "punishment", "move")
+        allowed_kinds = ("curiosity", "incident", "competition", "reward", "punishment", "move", "door", "evolve")
         if cleaned_kind not in allowed_kinds:
             raise ValueError(f"Spark kind must be one of {', '.join(allowed_kinds)}.")
 
@@ -1724,6 +1799,106 @@ class ObservatoryBackend:
             raise ValueError("Please share a spark or thought before sending it into the world.")
 
         with self.lock:
+            if cleaned_kind == "door":
+                if self.source_mode == "demo" and self._demo_world is not None:
+                    w = self._demo_world
+                    did = door_id or next(iter(sorted(w.doors)), None)
+                    if not did or did not in w.doors:
+                        raise ValueError("No matching doorway was found in the sanctuary.")
+                    res = w.toggle_door(did)
+                    door_obj = res["door"]
+                    tick = w.tick
+                elif self.world_url:
+                    client = WorldClient(self.world_url, timeout=2.5)
+                    summary = client.summary()
+                    doors_list = summary.get("doors", [])
+                    did = door_id or (doors_list[0]["id"] if doors_list else None)
+                    if not did:
+                        raise ValueError("No matching doorway was found in the sanctuary.")
+                    res = client.toggle_door(did)
+                    if not res.get("ok"):
+                        raise ValueError("That doorway could not be changed right now.")
+                    door_obj = res["door"]
+                    tick = int(summary.get("tick", 0))
+                else:
+                    w = SharedWorld(state_path=self.world_state_path)
+                    did = door_id or next(iter(sorted(w.doors)), None)
+                    if not did or did not in w.doors:
+                        raise ValueError("No matching doorway was found in the sanctuary.")
+                    res = w.toggle_door(did)
+                    door_obj = res["door"]
+                    tick = w.tick
+
+                za = zone_label(str(door_obj.get("zone_a", "hub")))
+                zb = zone_label(str(door_obj.get("zone_b", "hub")))
+                dstate = str(door_obj.get("state", "open"))
+                ack = (
+                    f"The doorway between {za} and {zb} is now gently guarded."
+                    if dstate == "guarded"
+                    else f"The doorway between {za} and {zb} now stands open in warm welcome."
+                )
+                return {
+                    "ok": True,
+                    "kind": "door",
+                    "door": door_obj,
+                    "acknowledgment": ack,
+                    "spoken_reply": ack,
+                    "world_tick": tick,
+                }
+
+            if cleaned_kind == "evolve":
+                role = "general"
+                tick = 0
+                if self.source_mode == "demo" and self._demo_world is not None:
+                    tick = self._demo_world.tick
+                    if body_id and body_id in self._demo_beings:
+                        role = self._demo_beings[body_id].role
+                elif self.world_url:
+                    try:
+                        summary = WorldClient(self.world_url, timeout=2.0).summary()
+                        tick = int(summary.get("tick", 0))
+                        if body_id and body_id in summary.get("bodies", {}):
+                            role = str(summary["bodies"][body_id].get("role", "general"))
+                    except Exception:
+                        pass
+
+                seed_genome = Genome(identity=f"body-{role}", role=role)
+                champion, history = evolve_generation(
+                    seed_genome, generations=1, population_size=2, seed=tick + 7,
+                )
+                best_score = max((h.get("fitness", 0.0) for h in history), default=90.0)
+                insight = (
+                    f"A gentle trait trial for {role} found calm harmony "
+                    f"(balance score {best_score:.1f}, zero safety breaches) with steady memory rhythm."
+                )
+                beat = {
+                    "id": f"evo-{tick}-{len(self._evolution_insights) + 1}",
+                    "tick": tick,
+                    "who": "The Sanctuary",
+                    "where": "Tapestry of Traits",
+                    "sentence": insight,
+                    "tone": "curious",
+                    "fitness": round(float(best_score), 2),
+                    "champion": champion.identity,
+                }
+                self._evolution_insights.append(beat)
+                if len(self._evolution_insights) > 12:
+                    del self._evolution_insights[:-12]
+                return {
+                    "ok": True,
+                    "kind": "evolve",
+                    "insight": insight,
+                    "champion": {
+                        "identity": champion.identity,
+                        "role": champion.role,
+                        "fitness": round(float(best_score), 2),
+                        "myelin_min_support": champion.myelin_min_support,
+                        "myelin_min_span": champion.myelin_min_span,
+                    },
+                    "acknowledgment": insight,
+                    "spoken_reply": f"A gentle adaptation trial finished for {role} with full safety.",
+                    "world_tick": tick,
+                }
             if cleaned_kind == "competition":
                 title = cleaned_spark or "Starlight Harmony Trial"
                 trial_kind = "triage_race" if "race" in title.lower() else "harmony_trial"
@@ -2036,12 +2211,14 @@ def make_observatory_server(
                 kind = str(body.get("kind") or "curiosity")
                 body_id = body.get("body_id")
                 target_zone = body.get("target_zone")
+                door_id = body.get("door_id")
                 result = backend.pulse(
                     zone=zone,
                     spark=spark,
                     kind=kind,
                     body_id=str(body_id) if body_id else None,
                     target_zone=str(target_zone) if target_zone else None,
+                    door_id=str(door_id) if door_id else None,
                 )
                 self._send_json(200, result)
             except (ValueError, json.JSONDecodeError) as exc:

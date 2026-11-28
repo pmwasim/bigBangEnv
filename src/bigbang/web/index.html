@@ -91,11 +91,37 @@
         <button id="cam-zoom-out" class="cam-zoom-btn" type="button" aria-label="Zoom out">&minus;</button>
       </div>
 
-      <div id="competition-banner" class="glass-pill competition-banner hidden" role="status" aria-live="polite">
+      <button
+        id="competition-banner"
+        class="glass-pill competition-banner"
+        type="button"
+        aria-expanded="false"
+        aria-controls="playground-popover"
+      >
         <span class="pill-orb amber-orb" aria-hidden="true"></span>
-        <span id="competition-text">Playground Trial in progress</span>
-      </div>
+        <span id="competition-text">Starlight Arena · Trial Podium</span>
+      </button>
     </div>
+
+    <!-- Viewport-Clamped Playground Podium & Rewards/Corrections Popover -->
+    <aside id="playground-popover" class="glass-card playground-popover hidden" role="dialog" aria-label="Playground Podium and Honor">
+      <div class="popover-head">
+        <div>
+          <span class="eyebrow-soft">Starlight Arena</span>
+          <h2 id="podium-title" class="card-heading">Playground Podium &amp; Honor</h2>
+        </div>
+        <button id="playground-close-btn" class="icon-close" type="button" aria-label="Close playground podium">&times;</button>
+      </div>
+      <p id="podium-story" class="story-paragraph">Companions gather here to test grace, kindness, and swift coordination.</p>
+      <div class="podium-actions-row">
+        <button id="podium-run-trial-btn" class="glow-btn small-glow" type="button">Run Trial</button>
+        <span id="podium-countdown" class="karma-pill">Open Stage</span>
+      </div>
+      <h3 class="section-label">Podium Standings</h3>
+      <div id="playground-podium" class="podium-list"></div>
+      <h3 class="section-label" style="margin-top: 12px;">Recent Rewards &amp; Gentle Checks</h3>
+      <div id="playground-rewards-list" class="podium-rewards-list"></div>
+    </aside>
 
     <!-- Viewport-Clamped Voice & Sound Popover -->
     <div id="voice-popover" class="glass-card voice-popover hidden" role="dialog" aria-label="Voice and Ambient Sound">
@@ -286,13 +312,17 @@
           <button id="close-tapestry-btn" class="icon-close" type="button" aria-label="Close tapestry">&times;</button>
         </div>
 
-        <div class="tapestry-tabs" role="tablist">
-          <button id="tab-chapters" class="tapestry-tab active" type="button" role="tab" aria-selected="true">What We Have &amp; Built</button>
-          <button id="tab-events" class="tapestry-tab" type="button" role="tab" aria-selected="false">Live Story Moments</button>
+        <div class="tapestry-tabs-row">
+          <div class="tapestry-tabs" role="tablist">
+            <button id="tab-chapters" class="tapestry-tab active" type="button" role="tab" aria-selected="true">What We Have &amp; Built</button>
+            <button id="tab-events" class="tapestry-tab" type="button" role="tab" aria-selected="false">Live Story Moments</button>
+          </div>
+          <button id="evolve-traits-btn" class="glow-btn small-glow" type="button">Evolve Traits</button>
         </div>
 
         <div id="panel-chapters" class="tapestry-body" role="tabpanel">
           <p class="tapestry-intro">From the first spark of physics to embodied creatures walking paths, crossing doors, and growing in inner life — every milestone woven into this cosmos.</p>
+          <div id="evolution-insight-banner" class="evolution-insight-banner hidden" role="status" aria-live="polite"></div>
           <div id="chapters-timeline" class="chapters-timeline"></div>
         </div>
 

@@ -149,6 +149,7 @@ def cmd_world(args: argparse.Namespace) -> int:
         def _ticker() -> None:
             while not stop.wait(args.interval):
                 world.step(1)
+                world.choreograph()
 
         t = threading.Thread(target=_ticker, daemon=True)
         t.start()

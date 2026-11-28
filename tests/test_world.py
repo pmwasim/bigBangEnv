@@ -129,3 +129,27 @@ def test_shared_world_doors_competitions_rewards_and_punishments(tmp_path):
     w2 = SharedWorld(state_path=tmp_path / "world3d.json")
     assert w2.competition is not None and w2.competition["status"] == "completed"
     assert len(w2.rewards_log) >= 2
+
+
+def test_shared_world_choreograph_and_door_toggle():
+    w = SharedWorld()
+    w.enter("bb-gamma-scout", role="scout", zone="frontier")
+    w.enter("bb-gamma-weaver", role="weaver", zone="hub")
+    w.enter("bb-beta-planner", role="planner", zone="beta-sector")
+
+    # Toggle door open <-> guarded
+    t1 = w.toggle_door("door:hub:playground")
+    assert t1["ok"] is True and t1["door"]["state"] == "guarded"
+    t2 = w.toggle_door("door:hub:playground")
+    assert t2["ok"] is True and t2["door"]["state"] == "open"
+
+    # Run choreograph across several ticks and confirm autonomous trial & movement
+    seen_actions: list[str] = []
+    for _ in range(12):
+        w.step(1)
+        res = w.choreograph()
+        seen_actions.extend(res["actions"])
+
+    assert w.competition is not None
+    assert any(a.startswith("move:") for a in seen_actions)
+    assert any(d["crossings"] > 0 for d in w.doors.values())
