@@ -64,6 +64,7 @@ M1's exit criteria are met (ADR-0008). Still deferred until there is an API budg
 - [x] `ReputationLedger` peer trust decay/reward and `TerritoryTable` mutual-exclusion claims
 - [x] Schmitt-trigger cross-Body hormonal backpressure in `WorldSociety` and `bigbang-mesh.py`
 
-## Later — Genetics, Evolution & Live Domain Sensors
+## M6 — Genetics, Evolution & Live Domain Sensors *(Level 7+)* — **done**
 
-Autonomous `Genome` mutation/selection loop across benchmarked workloads and domain-native VM/system telemetry sensors.
+- [x] Bounded deterministic `Genome` mutation & elitist selection with zero-violation gating (`evolution.py`, `bigbang evolve`)
+- [x] Pure-stdlib POSIX/Linux domain telemetry probe translating resource pressure into Chemistry reagents and World issues (`sensors.py`, `bigbang probe`, `bigbang-mesh probe`)

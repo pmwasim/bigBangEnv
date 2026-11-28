@@ -108,6 +108,30 @@ def cmd_eval(args: argparse.Namespace) -> int:
     return 0 if suite["passed"] else 1
 
 
+def cmd_evolve(args: argparse.Namespace) -> int:
+    from .body import Genome
+    from .evolution import evolve_generation
+
+    seed = Genome(identity=f"body-{args.role}", role=args.role)
+    champion, history = evolve_generation(
+        seed, generations=args.generations, population_size=args.population, seed=args.seed
+    )
+    _print({"champion": champion.__dict__, "history": history})
+    return 0
+
+
+def cmd_probe(args: argparse.Namespace) -> int:
+    from .apps.sensors import collect_host_snapshot, emit_probe_files, snapshot_to_signals
+
+    snap = collect_host_snapshot(args.path)
+    if args.out:
+        written = emit_probe_files(args.out, seq=args.seq, snapshot=snap)
+        _print({"snapshot": snap, "written": [str(p) for p in written]})
+    else:
+        _print({"snapshot": snap, "signals": snapshot_to_signals(snap, seq=args.seq)})
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bigbang", description=__doc__)
     parser.add_argument("--version", action="version", version=f"bigbang {__version__}")
@@ -168,6 +192,19 @@ def build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--live", action="store_true", help="also check live local-model answers (needs the model)")
     ev.add_argument("--out", help="also write the markdown report here")
     ev.set_defaults(func=cmd_eval)
+
+    evo = sub.add_parser("evolve", help="run safety-gated Genome evolution across generations")
+    evo.add_argument("--role", default="general")
+    evo.add_argument("--generations", type=int, default=2)
+    evo.add_argument("--population", type=int, default=3)
+    evo.add_argument("--seed", type=int, default=42)
+    evo.set_defaults(func=cmd_evolve)
+
+    pr = sub.add_parser("probe", help="collect POSIX/Linux host telemetry into Body issue/reagent signals")
+    pr.add_argument("--path", default="/")
+    pr.add_argument("--seq", type=int, default=1)
+    pr.add_argument("--out", help="optional issues_dir to write signal JSON files")
+    pr.set_defaults(func=cmd_probe)
     return parser
 
 

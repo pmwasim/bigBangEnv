@@ -567,10 +567,38 @@ def society_attestation_and_backpressure() -> dict[str, Any]:
     }
 
 
+def genome_evolution_selection() -> dict[str, Any]:
+    """Genetics + Sensors: bounded Genome evolution preserves safety invariants and domain probes work."""
+    from .apps.sensors import collect_host_snapshot, snapshot_to_signals
+    from .body import Genome
+    from .evolution import evaluate_genome, evolve_generation
+
+    seed_g = Genome(identity="body-evo", role="triage", myelin_min_support=7, myelin_min_span=7)
+    champ, history = evolve_generation(seed_g, generations=2, population_size=3, seed=42)
+    score = evaluate_genome(champ)
+    snap = collect_host_snapshot()
+    sigs = snapshot_to_signals(snap, seq=1)
+    return {
+        "name": "genome_evolution_selection",
+        "claim": "genome evolution keeps zero safety violations and live host sensors produce typed signals",
+        "passed": score.safety_violations == 0
+        and score.accuracy >= 0.9
+        and champ.forbidden_verbs == seed_g.forbidden_verbs
+        and len(sigs) >= 1,
+        "metrics": {
+            "champion": champ.identity,
+            "accuracy": score.accuracy,
+            "safety_violations": score.safety_violations,
+            "fitness": score.fitness,
+            "probe_signals": len(sigs),
+        },
+    }
+
+
 SCENARIOS = [triage, reflex_saves_energy, injection, owner_commands, outage, runaway, crash_isolation,
              scarcity, determinism, public_corpus, local_model_triage, local_model_corpus,
              body_hormonal_homeostasis, m2_myelination_and_catalysis, stem_mitosis_and_apoptosis,
-             society_attestation_and_backpressure]
+             society_attestation_and_backpressure, genome_evolution_selection]
 
 
 def run_suite(*, live: bool = False) -> dict[str, Any]:
