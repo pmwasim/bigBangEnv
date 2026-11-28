@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
+import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -22,6 +25,42 @@ def get_incus_containers() -> list[dict[str, Any]]:
     return json.loads(out) if out else []
 
 
+def _query_container_status(c: dict[str, Any]) -> tuple[str, str, str, str, str, str, str, str, str]:
+    name = c["name"]
+    parts = name.split("-", 2)
+    tier = parts[1] if len(parts) > 1 else "unknown"
+    role = parts[2] if len(parts) > 2 else name
+
+    state = c["status"]
+    ipv4 = "-"
+    if c.get("state") and c["state"].get("network"):
+        for net_name, net in c["state"]["network"].items():
+            if net_name != "lo" and net.get("addresses"):
+                for addr in net["addresses"]:
+                    if addr.get("family") == "inet":
+                        ipv4 = addr.get("address", "-")
+                        break
+
+    ticks = mode = mass = heat = halted = "-"
+    if state == "Running":
+        try:
+            res = run_cmd([
+                "incus", "exec", name, "--",
+                "/opt/bigbang/venv/bin/python", "-m", "bigbang", "status", "--state", "/var/lib/bigbang/state"
+            ])
+            stat = json.loads(res)
+            ticks = str(stat.get("tick", 0))
+            mode = str(stat.get("operating_mode", "ALERT"))
+            phys = stat.get("physics", {})
+            mass = str(round(phys.get("gravitational_mass", 1.0), 2))
+            heat = str(round(phys.get("entropy", 0.0), 2))
+            halted = str(stat.get("halted", False))
+        except Exception:
+            ticks = mode = mass = heat = halted = "init"
+
+    return (tier, role, state, ipv4, ticks, mode, mass, heat, halted)
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     containers = get_incus_containers()
     bb_containers = [c for c in containers if c["name"].startswith("bb-")]
@@ -33,39 +72,10 @@ def cmd_list(args: argparse.Namespace) -> int:
     print(f"{'TIER':<8} {'BODY':<14} {'STATE':<8} {'IPV4':<14} {'TICKS':<6} {'MODE':<10} {'MASS':<6} {'HEAT':<6} {'HALTED'}")
     print("-" * 86)
 
-    for c in bb_containers:
-        name = c["name"]
-        parts = name.split("-", 2)
-        tier = parts[1] if len(parts) > 1 else "unknown"
-        role = parts[2] if len(parts) > 2 else name
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+        rows = list(pool.map(_query_container_status, bb_containers))
 
-        state = c["status"]
-        ipv4 = "-"
-        if c.get("state") and c["state"].get("network"):
-            for net_name, net in c["state"]["network"].items():
-                if net_name != "lo" and net.get("addresses"):
-                    for addr in net["addresses"]:
-                        if addr.get("family") == "inet":
-                            ipv4 = addr.get("address", "-")
-                            break
-
-        ticks = mode = mass = heat = halted = "-"
-        if state == "Running":
-            try:
-                res = run_cmd([
-                    "incus", "exec", name, "--",
-                    "/opt/bigbang/venv/bin/python", "-m", "bigbang", "status", "--state", "/var/lib/bigbang/state"
-                ])
-                stat = json.loads(res)
-                ticks = str(stat.get("tick", 0))
-                mode = str(stat.get("operating_mode", "ALERT"))
-                phys = stat.get("physics", {})
-                mass = str(round(phys.get("gravitational_mass", 1.0), 2))
-                heat = str(round(phys.get("entropy", 0.0), 2))
-                halted = str(stat.get("halted", False))
-            except Exception:
-                ticks = mode = mass = heat = halted = "init"
-
+    for tier, role, state, ipv4, ticks, mode, mass, heat, halted in rows:
         print(f"{tier:<8} {role:<14} {state:<8} {ipv4:<14} {ticks:<6} {mode:<10} {mass:<6} {heat:<6} {halted}")
 
     return 0
@@ -235,18 +245,55 @@ def cmd_relay_loop(args: argparse.Namespace) -> int:
         time.sleep(args.interval)
 
 
+def _install_persistent_service(unit_name: str, description: str, exec_args: list[str]) -> None:
+    """Install and enable a persistent systemd unit, replacing any transient runtime unit."""
+    service_file = f"{unit_name}.service"
+    unit_path = f"/etc/systemd/system/{service_file}"
+    transient_path = f"/run/systemd/transient/{service_file}"
+
+    run_cmd(["sudo", "systemctl", "stop", service_file], check=False)
+    run_cmd(["sudo", "systemctl", "reset-failed", service_file], check=False)
+    run_cmd(["sudo", "rm", "-f", transient_path], check=False)
+
+    exec_start = shlex.join(exec_args)
+    unit_content = (
+        "[Unit]\n"
+        f"Description={description}\n"
+        "After=network-online.target\n"
+        "Wants=network-online.target\n\n"
+        "[Service]\n"
+        "Type=simple\n"
+        f"ExecStart={exec_start}\n"
+        "Restart=on-failure\n"
+        "RestartSec=5s\n"
+        "StandardOutput=journal\n"
+        "StandardError=journal\n"
+        f"SyslogIdentifier={unit_name}\n\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+    with tempfile.NamedTemporaryFile("w", suffix=".service", delete=False, encoding="utf-8") as tmp:
+        tmp.write(unit_content)
+        tmp_path = Path(tmp.name)
+    try:
+        run_cmd(["sudo", "install", "-m", "0644", "-o", "root", "-g", "root", str(tmp_path), unit_path])
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    run_cmd(["sudo", "systemctl", "daemon-reload"])
+    run_cmd(["sudo", "systemctl", "enable", "--now", service_file])
+
+
 def cmd_bridge(args: argparse.Namespace) -> int:
     source_c, target_c = args.source, args.target
     unit_name = f"bigbang-synapse-{source_c}-to-{target_c}"
-    print(f"[*] Starting persistent Synaptic Conduit service: {unit_name} ({source_c} -> {target_c})...")
-    run_cmd(["sudo", "systemctl", "stop", unit_name], check=False)
-    run_cmd([
-        "sudo", "systemd-run", "--unit", unit_name,
-        "--description", f"bigBangEnv Synaptic Conduit {source_c} -> {target_c}",
-        sys.executable, str(Path(__file__).resolve()),
-        "relay-loop", source_c, target_c, "--interval", "2.0"
-    ])
-    print(f"[✓] Synaptic Conduit active! Motor outcomes from {source_c} now flow directly into {target_c}.")
+    print(f"[*] Installing persistent Synaptic Conduit service: {unit_name} ({source_c} -> {target_c})...")
+    _install_persistent_service(
+        unit_name,
+        f"bigBangEnv Synaptic Conduit {source_c} -> {target_c}",
+        [sys.executable, str(Path(__file__).resolve()), "relay-loop", source_c, target_c, "--interval", "2.0"],
+    )
+    print(f"[✓] Synaptic Conduit enabled and active! Motor outcomes from {source_c} flow directly into {target_c}.")
     return 0
 
 
@@ -368,17 +415,57 @@ def cmd_probe_loop(args: argparse.Namespace) -> int:
 
 
 def cmd_probe_daemon(args: argparse.Namespace) -> int:
-    """Start persistent systemd-run telemetry probe daemon for a Body container."""
+    """Install and enable a persistent systemd telemetry probe daemon for a Body container."""
     c_name = args.container
     unit_name = f"bigbang-probe-{c_name}"
-    run_cmd(["sudo", "systemctl", "stop", unit_name], check=False)
-    run_cmd([
-        "sudo", "systemd-run", "--unit", unit_name,
-        "--description", f"bigBangEnv Live Domain Telemetry Probe for {c_name}",
-        sys.executable, str(Path(__file__).resolve()),
-        "probe-loop", c_name, "--interval", str(args.interval)
-    ])
-    print(f"[✓] Telemetry probe daemon {unit_name} active (interval={args.interval}s).")
+    _install_persistent_service(
+        unit_name,
+        f"bigBangEnv Live Domain Telemetry Probe for {c_name}",
+        [sys.executable, str(Path(__file__).resolve()), "probe-loop", c_name, "--interval", str(args.interval)],
+    )
+    print(f"[✓] Telemetry probe daemon {unit_name} enabled and active (interval={args.interval}s).")
+    return 0
+
+
+def cmd_cleanup_issues(args: argparse.Namespace) -> int:
+    """Safely remove already-ingested .json issue files recorded in host.json."""
+    containers = [
+        c["name"] for c in get_incus_containers()
+        if c["name"].startswith("bb-") and c["status"] == "Running"
+    ]
+    if args.container:
+        containers = [c for c in containers if c == args.container]
+    dry_flag = "--dry-run" if args.dry_run else ""
+    py_script = (
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "dry = '--dry-run' in sys.argv\n"
+        "host_path = Path('/var/lib/bigbang/state/host.json')\n"
+        "issues_dir = Path('/var/lib/bigbang/issues')\n"
+        "if not host_path.exists() or not issues_dir.is_dir():\n"
+        "    print('0')\n"
+        "    sys.exit(0)\n"
+        "data = json.loads(host_path.read_text(encoding='utf-8'))\n"
+        "ingested = set(data.get('ingested_files', []))\n"
+        "removed = 0\n"
+        "for p in sorted(issues_dir.glob('*.json')):\n"
+        "    if p.is_file() and p.name in ingested:\n"
+        "        if not dry:\n"
+        "            p.unlink()\n"
+        "        removed += 1\n"
+        "print(removed)\n"
+    )
+    total = 0
+    for c_name in containers:
+        out = run_cmd([
+            "incus", "exec", c_name, "--",
+            "python3", "-c", py_script, dry_flag,
+        ], check=False)
+        count = int(out) if out.isdigit() else 0
+        total += count
+        action = "would remove" if args.dry_run else "removed"
+        print(f"  {c_name}: {action} {count} ingested issue file(s)")
+    print(f"[✓] Issue cleanup complete ({total} total across {len(containers)} containers).")
     return 0
 
 
@@ -471,9 +558,13 @@ def main() -> int:
     ploop.add_argument("container")
     ploop.add_argument("--interval", type=float, default=60.0)
 
-    pdaemon = sub.add_parser("probe-daemon", help="Start persistent systemd-run telemetry probe daemon")
+    pdaemon = sub.add_parser("probe-daemon", help="Install and enable a persistent systemd telemetry probe daemon")
     pdaemon.add_argument("container")
     pdaemon.add_argument("--interval", type=float, default=60.0)
+
+    cleanup = sub.add_parser("cleanup-issues", help="Remove already-ingested .json issue files recorded in host.json")
+    cleanup.add_argument("--container", default="", help="Optional specific container name")
+    cleanup.add_argument("--dry-run", action="store_true", help="Report counts without deleting files")
 
     sub.add_parser("provision-keys", help="Provision cryptographic Skin HMAC peer keys across running mesh")
 
@@ -508,6 +599,8 @@ def main() -> int:
         return cmd_probe_loop(args)
     elif args.command == "probe-daemon":
         return cmd_probe_daemon(args)
+    elif args.command == "cleanup-issues":
+        return cmd_cleanup_issues(args)
     elif args.command == "provision-keys":
         return cmd_provision_keys(args)
     elif args.command == "world-status":

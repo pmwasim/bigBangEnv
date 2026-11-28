@@ -7,6 +7,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import deque
 from dataclasses import asdict, dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -744,6 +745,112 @@ class SharedWorld:
             self.save()
             return self.tick
 
+    def toggle_door(self, door_id: str) -> dict[str, Any]:
+        """Toggle a luminous Door between 'open' and 'guarded' state."""
+        with self._lock:
+            if door_id not in self.doors:
+                return {"ok": False, "reason": "unknown_door"}
+            door = self.doors[door_id]
+            new_state = "guarded" if door.get("state") == "open" else "open"
+            door["state"] = new_state
+            door["guarded_until_tick"] = (self.tick + 12) if new_state == "guarded" else 0
+            self._log("door_toggle", door=door_id, state=new_state, zone=door["zone_a"])
+            self.save()
+            return {"ok": True, "door": dict(door)}
+
+    def _next_step_toward(self, start: str, goal: str) -> str | None:
+        if start == goal or start not in self.zones or goal not in self.zones:
+            return None
+        q = deque([(start, [start])])
+        seen = {start}
+        while q:
+            cur, path = q.popleft()
+            for nb in self.zones[cur].neighbors:
+                if nb == goal:
+                    return path[1] if len(path) > 1 else nb
+                if nb not in seen and nb in self.zones:
+                    seen.add(nb)
+                    q.append((nb, path + [nb]))
+        return None
+
+    def choreograph(self) -> dict[str, Any]:
+        """Advance autonomous world life: periodic trials, door crossings, home rest, and harmony checks."""
+        with self._lock:
+            actions: list[str] = []
+            if not self.bodies:
+                return {"tick": self.tick, "actions": actions}
+
+            trial_titles = (
+                "Starlight Harmony Trial",
+                "Lantern Triage Relay",
+                "Aurora Balance Quest",
+                "Bridgekeepers' Trial",
+            )
+            # 1. Periodically open a friendly Playground Competition when idle
+            comp = self.competition
+            if comp is None or (comp.get("status") == "completed" and (self.tick - int(comp.get("ends_tick", 0))) >= 6):
+                if self.tick % 12 == 0 or comp is None:
+                    title = trial_titles[(self.tick // 12) % len(trial_titles)]
+                    self.start_competition(title, kind="harmony_trial", duration=12)
+                    actions.append(f"competition:{title}")
+
+            # 2. Update active competition standings from real actions, energy harvested, and honor
+            if self.competition and self.competition.get("status") == "active":
+                scores = self.competition.setdefault("scores", {})
+                for bid, b in self.bodies.items():
+                    base = (
+                        int(b.get("actions_completed", 0)) * 0.25
+                        + float(b.get("energy_harvested", 0.0)) * 0.005
+                        + int(b.get("honor", 0)) * 0.35
+                    )
+                    in_arena = 0.6 if b.get("zone") == self.competition.get("zone") else 0.0
+                    scores[bid] = round(max(float(scores.get(bid, 0.0)), base) + in_arena, 2)
+                    if bid not in self.competition["participants"]:
+                        self.competition["participants"].append(bid)
+
+            # 3. Gently guide inhabitants across Paths & Doors toward trials, frontier, or home rest
+            body_ids = sorted(self.bodies.keys())
+            if body_ids and self.tick % 3 == 0:
+                traveler_id = body_ids[(self.tick // 3) % len(body_ids)]
+                tb = self.bodies[traveler_id]
+                cur_zone = str(tb.get("zone", "hub"))
+                home_id = str(tb.get("home", "home-hub"))
+                home_zone = next((zn for zn, (hid, _, _) in _HOME_META.items() if hid == home_id), "hub")
+
+                target_zone: str | None = None
+                if self.competition and self.competition.get("status") == "active" and tb.get("role") in ("scout", "weaver", "planner", "executor"):
+                    target_zone = str(self.competition.get("zone", "playground"))
+                elif tb.get("role") in ("planner", "auditor") and (self.tick % 9 == 0):
+                    tb["walk_state"] = "resting_home" if cur_zone == home_zone else "walking_path"
+                    target_zone = home_zone if cur_zone != home_zone else None
+                else:
+                    neighbors = self.zones[cur_zone].neighbors if cur_zone in self.zones else ()
+                    if neighbors:
+                        target_zone = neighbors[(self.tick + len(traveler_id)) % len(neighbors)]
+
+                if target_zone and target_zone != cur_zone:
+                    step_zone = target_zone if target_zone in self.zones[cur_zone].neighbors else self._next_step_toward(cur_zone, target_zone)
+                    if step_zone:
+                        res = self.move(traveler_id, step_zone)
+                        if res.get("moved"):
+                            actions.append(f"move:{traveler_id}->{step_zone}")
+
+            # 4. Gentle constructive correction if a zone shows sustained high turbulence/hazard
+            for zname, zone in sorted(self.zones.items()):
+                if zone.hazard >= 0.35 or zone.ambient_entropy >= 2.5:
+                    candidate = next(
+                        (bid for bid in body_ids if self.bodies[bid].get("zone") == zname and int(self.bodies[bid].get("penance_ticks", 0)) == 0),
+                        None,
+                    )
+                    if candidate:
+                        self.apply_punishment(candidate, penalty=1, reason="high zone turbulence requiring calm reflection", guard_door=False)
+                        zone.ambient_entropy = round(zone.ambient_entropy * 0.7, 4)
+                        actions.append(f"punishment:{candidate}")
+                    break
+
+            self.save()
+            return {"tick": self.tick, "actions": actions}
+
     def places_snapshot(self) -> dict[str, Any]:
         """Return structured 3D places (lands, homes, playgrounds, paths, doors) and trials."""
         with self._lock:
@@ -892,6 +999,12 @@ class WorldClient:
             "body_id": body_id, "penalty": penalty, "reason": reason, "guard_door": guard_door,
         })
 
+    def toggle_door(self, door_id: str) -> dict[str, Any]:
+        return self._req("POST", "/door", {"door_id": door_id})
+
+    def choreograph(self) -> dict[str, Any]:
+        return self._req("POST", "/choreograph", {})
+
 
 def make_world_server(
     world: SharedWorld,
@@ -975,6 +1088,10 @@ def make_world_server(
                         reason=str(data.get("reason", "overstepped gentle bounds")),
                         guard_door=bool(data.get("guard_door", False)),
                     ))
+                elif self.path == "/door":
+                    self._send(200, world.toggle_door(str(data["door_id"])))
+                elif self.path == "/choreograph":
+                    self._send(200, world.choreograph())
                 else:
                     self._send(404, {"error": "not found"})
             except (KeyError, ValueError, json.JSONDecodeError) as exc:

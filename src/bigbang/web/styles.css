@@ -394,16 +394,30 @@ body {
   align-items: center;
   gap: 9px;
   padding: 8px 16px;
-  font-size: 0.82rem;
+  font: inherit;
+  font-size: 0.81rem;
+  font-weight: 500;
   color: var(--soul-gold);
-  border-color: rgba(246, 196, 109, 0.38);
-  box-shadow: 0 0 26px rgba(246, 196, 109, 0.16), var(--shadow-cosmic);
+  border-color: rgba(246, 196, 109, 0.36);
+  box-shadow: 0 0 24px rgba(246, 196, 109, 0.14), var(--shadow-cosmic);
   max-width: 100%;
+  cursor: pointer;
+  transition: transform 0.2s var(--ease-organic), border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-/* Fixed Viewport-Clamped Popovers (Voice & Vitality) */
+.competition-banner:hover {
+  transform: translateY(-1px);
+  border-color: rgba(246, 196, 109, 0.62);
+}
+
+.competition-banner.is-live {
+  box-shadow: 0 0 28px rgba(246, 196, 109, 0.28), var(--shadow-cosmic);
+}
+
+/* Fixed Viewport-Clamped Popovers (Voice, Vitality & Playground Podium) */
 .voice-popover,
-.vitality-popover {
+.vitality-popover,
+.playground-popover {
   position: fixed;
   top: 84px;
   right: 22px;
@@ -422,6 +436,59 @@ body {
 
 .vitality-popover {
   width: min(360px, calc(100vw - 24px));
+}
+
+.playground-popover {
+  width: min(390px, calc(100vw - 24px));
+  border-color: var(--glass-border-warm);
+}
+
+.podium-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.podium-list,
+.podium-rewards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.podium-row,
+.podium-reward-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.82rem;
+}
+
+.podium-rank {
+  font-weight: 600;
+  color: var(--soul-gold);
+}
+
+.podium-score {
+  font-size: 0.78rem;
+  color: var(--emerald-flow);
+}
+
+.podium-reward-row {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  border-left: 2px solid var(--soul-amber);
+}
+
+.podium-reward-row.is-punishment {
+  border-left-color: var(--coral-turbulence);
 }
 
 .popover-head {
@@ -1257,6 +1324,14 @@ body {
   color: var(--soul-gold);
 }
 
+.tapestry-tabs-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .tapestry-tabs {
   display: inline-flex;
   gap: 8px;
@@ -1264,6 +1339,17 @@ body {
   border-radius: var(--radius-pill);
   background: rgba(255, 255, 255, 0.04);
   align-self: flex-start;
+}
+
+.evolution-insight-banner {
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(79, 227, 193, 0.12), rgba(246, 196, 109, 0.12));
+  border: 1px solid rgba(246, 196, 109, 0.32);
+  font-size: 0.86rem;
+  line-height: 1.48;
+  color: var(--soul-gold);
 }
 
 .tapestry-tab {
@@ -1496,7 +1582,8 @@ body {
   }
 
   .voice-popover,
-  .vitality-popover {
+  .vitality-popover,
+  .playground-popover {
     left: 12px !important;
     right: 12px !important;
     width: auto !important;

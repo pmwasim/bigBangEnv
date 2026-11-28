@@ -124,7 +124,9 @@ const state = {
   hoveredHit: null,
   lastTick: -1,
   lastBulletinId: null,
+  lastSpokenEventId: null,
   lastEventIds: new Set(),
+  homeCycleIdx: 0,
   speechEnabled: false,
   chimesEnabled: false,
   selectedVoiceURI: "",
@@ -164,6 +166,7 @@ const state = {
 
 // DOM references
 const sanctuaryHudEl = document.querySelector(".sanctuary-hud");
+const nebulaEl = document.querySelector(".cosmos-nebula");
 const canvas = document.getElementById("biosphere-canvas");
 const ctx = canvas.getContext("2d");
 const tooltipEl = document.getElementById("canvas-tooltip");
@@ -181,6 +184,14 @@ const camZoomInBtn = document.getElementById("cam-zoom-in");
 const camZoomOutBtn = document.getElementById("cam-zoom-out");
 const competitionBannerEl = document.getElementById("competition-banner");
 const competitionTextEl = document.getElementById("competition-text");
+const playgroundPopoverEl = document.getElementById("playground-popover");
+const playgroundCloseBtn = document.getElementById("playground-close-btn");
+const podiumTitleEl = document.getElementById("podium-title");
+const podiumStoryEl = document.getElementById("podium-story");
+const podiumRunTrialBtn = document.getElementById("podium-run-trial-btn");
+const podiumCountdownEl = document.getElementById("podium-countdown");
+const playgroundPodiumEl = document.getElementById("playground-podium");
+const playgroundRewardsListEl = document.getElementById("playground-rewards-list");
 
 // Voice & Sound DOM
 const voicePillBtn = document.getElementById("voice-sound-btn");
@@ -251,6 +262,8 @@ const panelChaptersEl = document.getElementById("panel-chapters");
 const panelEventsEl = document.getElementById("panel-events");
 const chaptersTimelineEl = document.getElementById("chapters-timeline");
 const eventsChronicleEl = document.getElementById("events-chronicle");
+const evolveTraitsBtn = document.getElementById("evolve-traits-btn");
+const evolutionInsightBannerEl = document.getElementById("evolution-insight-banner");
 
 // ---------------------------------------------------------------------------
 // Helpers: Organic Naming, Viewport Clamping & Formatting
@@ -499,6 +512,7 @@ function resizeCanvas() {
 
   positionPopoverInViewport(voicePopoverEl, voicePillBtn);
   positionPopoverInViewport(vitalityPopoverEl, vitalityPillBtn);
+  positionPopoverInViewport(playgroundPopoverEl, competitionBannerEl);
 }
 
 function project3D(wx, wy, wz) {
@@ -1006,8 +1020,9 @@ function draw3DHome(home, coords, t) {
     sy: base.sy - h * 0.5,
     r: Math.max(18, 22 * s),
     type: "home",
+    home,
     label: home.label || home.name || "Cozy Home",
-    story: home.story || "A warm sanctuary hearth where beings dream and renew.",
+    story: `${home.name || "Cozy Home"} — ${home.story || "A warm sanctuary hearth where beings dream and renew."} (Click to visit resident)`,
   });
 }
 
@@ -1067,8 +1082,9 @@ function draw3DDoor(door, coords, t) {
     sy: base.sy - archH * 0.5,
     r: Math.max(16, 18 * s),
     type: "door",
+    door,
     label: door.name || door.label || "Realm Doorway",
-    story: door.story || (guarded ? "A guarded doorway watching for safety." : "An open luminous archway welcoming travelers."),
+    story: `${door.name || "Doorway"} (${guarded ? "Guarded" : "Open"}) — Click to toggle guardian seal`,
   });
 }
 
@@ -1142,11 +1158,15 @@ function drawArticulatedBeing3D(anim, t) {
   const isResting = walkState === "resting_home" || String(being.mode || "").includes("SLEEP");
   const isCompeting = walkState === "competing_playground";
   const isWorking = walkState === "crossing_door" || String(being.mode || "") === "DEEP_FOCUS";
+  const isMoving = (anim.speed ?? 0) > 0.15 || walkState === "walking_path" || walkState === "crossing_door";
 
-  const bobAmp = isResting ? 1.5 : isCompeting ? 5.5 : 3.2;
-  const bob = Math.sin(t * (isCompeting ? 5.2 : 2.3) + anim.phase) * bobAmp;
-  const proj = project3D(anim.wx, anim.wy, anim.wz + 12 + bob);
-  const footProj = project3D(anim.wx, anim.wy, anim.wz + 1);
+  const wanderX = walkState === "walking_path" && (anim.speed ?? 0) < 0.5 ? Math.cos(t * 0.55 + anim.phase) * 7 : 0;
+  const wanderY = walkState === "walking_path" && (anim.speed ?? 0) < 0.5 ? Math.sin(t * 0.45 + anim.phase) * 6 : 0;
+
+  const bobAmp = isResting ? 1.5 : isCompeting ? 5.5 : isMoving ? 4.0 : 2.6;
+  const bob = Math.sin(t * (isCompeting ? 5.4 : isMoving ? 4.2 : 2.1) + anim.phase) * bobAmp;
+  const proj = project3D(anim.wx + wanderX, anim.wy + wanderY, anim.wz + 12 + bob);
+  const footProj = project3D(anim.wx + wanderX, anim.wy + wanderY, anim.wz + 1);
   const s = Math.max(0.55, proj.scale);
 
   const pal = moodPalette(being);
@@ -1198,28 +1218,30 @@ function drawArticulatedBeing3D(anim, t) {
     ctx.stroke();
   }
 
-  // 1. LEGS (striding along paths/doors or tucked at Home)
-  const stride = isResting ? 0 : Math.sin(t * (3.5 + legStr * 3.0) + anim.phase) * (5.5 + legStr * 3.5) * s;
-  const legLen = (isResting ? 5 : 10 + legStr * 3) * s;
+  // 1. LEGS (crisp walking stride when velocity > 0.15 or strolling paths; tucked at Home)
+  const strideFreq = isMoving ? 6.2 + legStr * 3.5 : 3.0;
+  const strideAmp = isResting ? 0 : isMoving ? (6.5 + legStr * 4.0) * s : 2.4 * s;
+  const stride = Math.sin(t * strideFreq + anim.phase) * strideAmp;
+  const legLen = (isResting ? 5 : 10.5 + legStr * 3) * s;
   ctx.strokeStyle = pal.secondary;
   ctx.lineWidth = 2.6 * s;
   ctx.lineCap = "round";
   [-1, 1].forEach((side) => {
     const hipX = sx + side * 4.5 * s;
     const hipY = sy + 4 * s;
-    const footX = hipX + side * (isResting ? 3 * s : 1.5 * s) + (side === -1 ? stride : -stride) * 0.6;
-    const footY = hipY + legLen - (side === -1 ? Math.max(0, stride * 0.35) : Math.max(0, -stride * 0.35));
+    const footX = hipX + side * (isResting ? 3 * s : 1.5 * s) + (side === -1 ? stride : -stride) * 0.65;
+    const footY = hipY + legLen - (side === -1 ? Math.max(0, stride * 0.38) : Math.max(0, -stride * 0.38));
     ctx.beginPath();
     ctx.moveTo(hipX, hipY);
     ctx.quadraticCurveTo(hipX + side * 2 * s, hipY + legLen * 0.5, footX, footY);
     ctx.stroke();
   });
 
-  // 2. HANDS / ARMS (gesturing, crafting sparks, or raising celebration ribbons)
+  // 2. HANDS / ARMS (gesturing, carrying golden spark orbs, or raising celebration ribbons)
   const armWave = isCompeting || anim.rewardTimer > 0
     ? -8 * s - Math.abs(Math.sin(t * 6 + anim.phase)) * 7 * s
-    : isWorking
-      ? Math.sin(t * 4.5 + anim.phase) * 5 * s
+    : isWorking || isMoving
+      ? Math.sin(t * 4.8 + anim.phase) * 5.2 * s
       : Math.sin(t * 1.8 + anim.phase) * 2.5 * s;
 
   [-1, 1].forEach((side) => {
@@ -1234,9 +1256,10 @@ function drawArticulatedBeing3D(anim, t) {
     ctx.lineWidth = 2.4 * s;
     ctx.stroke();
 
+    const carryingOrb = side === 1 && (isWorking || isCompeting || walkState === "walking_path");
     ctx.beginPath();
-    ctx.arc(handX, handY, (2.2 + handStr * 1.4) * s, 0, Math.PI * 2);
-    ctx.fillStyle = isWorking || isCompeting ? "#ffdfa3" : pal.secondary;
+    ctx.arc(handX, handY, (carryingOrb ? 3.2 : 2.2 + handStr * 1.4) * s, 0, Math.PI * 2);
+    ctx.fillStyle = carryingOrb ? "#ffdfa3" : pal.secondary;
     ctx.fill();
   });
 
@@ -1529,11 +1552,15 @@ function renderFrame(nowMs) {
     });
   });
 
-  // Embodied Beings
+  // Embodied Beings (smooth 60fps 3D locomotion interpolation)
   for (const [, anim] of state.beingsAnim.entries()) {
-    anim.wx += (anim.targetX - anim.wx) * 0.05;
-    anim.wy += (anim.targetY - anim.wy) * 0.05;
-    anim.wz += (anim.targetZ - anim.wz) * 0.05;
+    const dx = anim.targetX - anim.wx;
+    const dy = anim.targetY - anim.wy;
+    const dz = anim.targetZ - anim.wz;
+    anim.speed = Math.hypot(dx, dy);
+    anim.wx += dx * 0.036;
+    anim.wy += dy * 0.036;
+    anim.wz += dz * 0.045;
     const d = project3D(anim.wx, anim.wy, anim.wz + 10).depth;
     renderQueue.push({ depth: d, draw: () => drawArticulatedBeing3D(anim, t) });
   }
@@ -1627,7 +1654,7 @@ window.addEventListener("pointermove", (ev) => {
   const hit = findHitAt(ev.clientX, ev.clientY);
   state.hoveredHit = hit;
   if (hit) {
-    canvas.style.cursor = hit.type === "being" ? "pointer" : "grab";
+    canvas.style.cursor = "pointer";
     tooltipEl.textContent = hit.story || hit.label;
     tooltipEl.style.left = `${Math.max(90, Math.min(window.innerWidth - 90, ev.clientX))}px`;
     tooltipEl.style.top = `${Math.max(70, ev.clientY)}px`;
@@ -1645,6 +1672,12 @@ window.addEventListener("pointerup", (ev) => {
     const hit = findHitAt(ev.clientX, ev.clientY);
     if (hit?.type === "being") {
       selectBeing(hit.id, { speak: true });
+    } else if (hit?.type === "door" && hit.door) {
+      toggleDoor(hit.door);
+    } else if (hit?.type === "home" && hit.home) {
+      focusHomeResident(hit.home);
+    } else if (hit?.type === "playground") {
+      openPlaygroundPopover(competitionBannerEl);
     }
   }
 });
@@ -2017,6 +2050,15 @@ function renderBeingDrawer() {
 }
 
 function renderTapestry() {
+  const insights = state.universe?.evolution_insights || [];
+  if (insights.length && evolutionInsightBannerEl) {
+    const latest = insights[insights.length - 1];
+    if (latest?.sentence) {
+      evolutionInsightBannerEl.textContent = latest.sentence;
+      evolutionInsightBannerEl.classList.remove("hidden");
+    }
+  }
+
   const chapters = state.universe?.chronicle?.chapters;
   const list = chapters && chapters.length ? chapters : DEFAULT_CHAPTERS;
 
@@ -2107,15 +2149,179 @@ function updateZoneDropdown(zones) {
   }
 }
 
+function applyDaylightSky(daylight) {
+  if (!nebulaEl || daylight == null || Number.isNaN(Number(daylight))) return;
+  const d = Math.max(0, Math.min(1, Number(daylight)));
+  // Smooth blend between twilight (#050814), dawn warmth (#14112b), and radiant starlight (#0c1836)
+  const dawnMix = Math.sin(d * Math.PI);
+  const topR = Math.round(5 + dawnMix * 16);
+  const topG = Math.round(8 + d * 12 + dawnMix * 6);
+  const topB = Math.round(20 + d * 24);
+  nebulaEl.style.background = `radial-gradient(circle at 50% 42%, rgb(${topR + 8}, ${topG + 12}, ${topB + 28}) 0%, rgb(${topR}, ${topG}, ${topB}) 74%)`;
+  nebulaEl.style.opacity = String((0.88 + dawnMix * 0.12).toFixed(2));
+}
+
 function renderCompetitionBanner(world) {
   const comp = world?.competition;
-  if (comp && (comp.active || comp.status === "active")) {
-    competitionBannerEl.classList.remove("hidden");
+  const isActive = Boolean(comp && (comp.active || comp.status === "active"));
+  competitionBannerEl.classList.remove("hidden");
+  competitionBannerEl.classList.toggle("is-live", isActive);
+  if (isActive) {
     const leaders = (comp.leaderboard || []).slice(0, 2).map((l) => l.name).filter(Boolean);
     const leaderTxt = leaders.length ? ` · Leading: ${leaders.join(", ")}` : "";
     competitionTextEl.textContent = `${comp.title || "Starlight Harmony Trial"}${leaderTxt}`;
   } else {
-    competitionBannerEl.classList.add("hidden");
+    competitionTextEl.textContent = "Starlight Arena · Trial Podium";
+  }
+  renderPlaygroundPopover();
+}
+
+function renderPlaygroundPopover() {
+  if (!playgroundPopoverEl || playgroundPopoverEl.classList.contains("hidden")) return;
+  const world = state.universe?.world || {};
+  const comp = world.competition;
+  const isActive = Boolean(comp && (comp.active || comp.status === "active"));
+
+  podiumTitleEl.textContent = comp?.title || "Starlight Arena Podium";
+  podiumStoryEl.textContent =
+    comp?.story ||
+    "Companions gather in Starlight Arena to test kindness, grace, and swift teamwork.";
+  if (isActive && comp?.ticks_remaining != null) {
+    podiumCountdownEl.textContent = `${comp.ticks_remaining} breaths left`;
+  } else if (comp?.winner_name) {
+    podiumCountdownEl.textContent = `Crowned · ${comp.winner_name}`;
+  } else {
+    podiumCountdownEl.textContent = isActive ? "Trial Live" : "Open Stage";
+  }
+
+  clearEl(playgroundPodiumEl);
+  const board = (comp?.podium && comp.podium.length ? comp.podium : comp?.leaderboard) || [];
+  if (!board.length) {
+    const empty = document.createElement("p");
+    empty.className = "horizon-whisper";
+    empty.textContent = "Start a friendly trial to see companions shine on the podium.";
+    playgroundPodiumEl.appendChild(empty);
+  } else {
+    board.slice(0, 5).forEach((entry, idx) => {
+      const row = document.createElement("div");
+      row.className = "podium-row";
+      const left = document.createElement("span");
+      left.className = "podium-rank";
+      const rank = entry.rank ?? idx + 1;
+      const medal = rank === 1 ? "★ " : rank === 2 ? "✦ " : `${rank}. `;
+      left.textContent = `${medal}${entry.name || entry.id}`;
+      const right = document.createElement("span");
+      right.className = "podium-score";
+      right.textContent = `${Number(entry.score ?? 0).toFixed(2)} radiance`;
+      row.append(left, right);
+      playgroundPodiumEl.appendChild(row);
+    });
+  }
+
+  clearEl(playgroundRewardsListEl);
+  const rlog = state.universe?.rewards_log || [];
+  if (!rlog.length) {
+    const empty = document.createElement("p");
+    empty.className = "horizon-whisper";
+    empty.textContent = "Honor rewards and gentle guidance moments will gather here.";
+    playgroundRewardsListEl.appendChild(empty);
+  } else {
+    rlog
+      .slice(-5)
+      .reverse()
+      .forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "podium-reward-row";
+        if (item.kind === "punishment") row.classList.add("is-punishment");
+        const txt = document.createElement("span");
+        txt.textContent = item.sentence || `${item.who || "Companion"} received ${item.kind || "honor"}.`;
+        row.appendChild(txt);
+        playgroundRewardsListEl.appendChild(row);
+      });
+  }
+}
+
+function openPlaygroundPopover(anchorEl = competitionBannerEl) {
+  const hidden = playgroundPopoverEl.classList.toggle("hidden");
+  competitionBannerEl.setAttribute("aria-expanded", String(!hidden));
+  if (!hidden) {
+    voicePopoverEl.classList.add("hidden");
+    voicePillBtn.setAttribute("aria-expanded", "false");
+    vitalityPopoverEl.classList.add("hidden");
+    vitalityPillBtn.setAttribute("aria-expanded", "false");
+    renderPlaygroundPopover();
+    positionPopoverInViewport(playgroundPopoverEl, anchorEl || competitionBannerEl);
+  }
+}
+
+async function toggleDoor(door) {
+  if (!door) return;
+  const doorId = door.id || door.name;
+  const zone = door.zone_a || door.zone || "hub";
+  const flashKey = `${door.zone_a || ""}:${door.zone_b || ""}`;
+  state.doorFlashes.set(flashKey, 1.0);
+  triggerRipple(zone, "#ffdfa3", 1.15);
+  playHarmonicChime("spark");
+  sparkFeedbackEl.textContent = `Adjusting guardian seal on ${door.name || "the doorway"}…`;
+
+  try {
+    const res = await fetch("/api/pulse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ zone, spark: door.name || doorId, kind: "door", door_id: doorId }),
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || result.ok === false) throw new Error(result.error || "Door unchanged");
+    sparkFeedbackEl.textContent = result.acknowledgment || `${door.name || "Doorway"} updated.`;
+    if (state.speechEnabled && result.spoken_reply) {
+      speakText(result.spoken_reply);
+    }
+    await refreshUniverse();
+  } catch (err) {
+    sparkFeedbackEl.textContent = err?.message || "Could not adjust that doorway right now.";
+  }
+}
+
+function focusHomeResident(home) {
+  if (!home) return;
+  const beings = state.universe?.beings || [];
+  const residents = Array.isArray(home.residents) && home.residents.length
+    ? beings.filter((b) => home.residents.includes(b.id))
+    : beings.filter((b) => b.home?.id === home.id || b.zone === home.zone);
+
+  triggerRipple(home.zone || "hub", "#f6c46d", 1.1);
+  if (residents.length) {
+    const chosen = residents[state.homeCycleIdx % residents.length];
+    state.homeCycleIdx += 1;
+    sparkFeedbackEl.textContent = `Visiting ${chosen.name} inside ${home.name || "Home"}.`;
+    selectBeing(chosen.id, { speak: true });
+  } else {
+    sparkFeedbackEl.textContent = `${home.name || "Cozy Home"} glows quietly, waiting for companions to rest.`;
+  }
+}
+
+async function triggerTrialPulse(customTitle = "Starlight Harmony Trial") {
+  sparkFeedbackEl.textContent = "Opening a Playground Trial in Starlight Arena…";
+  triggerRipple("playground", "#f6c46d", 1.45);
+  triggerFilament("hub", "playground", "#ffdfa3");
+  playHarmonicChime("reward");
+
+  try {
+    const res = await fetch("/api/pulse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ zone: "playground", spark: customTitle, kind: "competition" }),
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || result.ok === false) throw new Error(result.error || "Trial paused");
+    sparkInputEl.value = "";
+    sparkFeedbackEl.textContent = result.acknowledgment || "A friendly Playground Trial has begun!";
+    if (state.speechEnabled && result.spoken_reply) {
+      speakText(result.spoken_reply);
+    }
+    await refreshUniverse();
+  } catch (err) {
+    sparkFeedbackEl.textContent = err?.message || "Could not start the Playground Trial right now.";
   }
 }
 
@@ -2193,6 +2399,12 @@ async function refreshUniverse() {
         state.lastEventIds.add(eid);
         if (!firstLoad) {
           triggerRipple(ev.where || "hub", toneColor(ev.tone), 1.0);
+          const major = ["warm", "alert"].includes(String(ev.tone || "").toLowerCase()) ||
+            /crowned|honor|trial|door|evolved/i.test(String(ev.sentence || ""));
+          if (major && state.speechEnabled && ev.sentence && eid !== state.lastSpokenEventId) {
+            state.lastSpokenEventId = eid;
+            speakText(ev.sentence);
+          }
         }
       }
     });
@@ -2201,6 +2413,7 @@ async function refreshUniverse() {
     }
     state.lastTick = tick;
 
+    applyDaylightSky(data.world?.daylight);
     syncBeingsAnimationState(beings);
     renderBeingsStrip(beings);
     renderHostVitality(data.machine);
@@ -2235,6 +2448,8 @@ voicePillBtn.addEventListener("click", () => {
   if (!hidden) {
     vitalityPopoverEl.classList.add("hidden");
     vitalityPillBtn.setAttribute("aria-expanded", "false");
+    playgroundPopoverEl.classList.add("hidden");
+    competitionBannerEl.setAttribute("aria-expanded", "false");
     populateVoices();
     positionPopoverInViewport(voicePopoverEl, voicePillBtn);
   }
@@ -2288,9 +2503,20 @@ vitalityPillBtn.addEventListener("click", () => {
   if (!hidden) {
     voicePopoverEl.classList.add("hidden");
     voicePillBtn.setAttribute("aria-expanded", "false");
+    playgroundPopoverEl.classList.add("hidden");
+    competitionBannerEl.setAttribute("aria-expanded", "false");
     positionPopoverInViewport(vitalityPopoverEl, vitalityPillBtn);
   }
 });
+
+competitionBannerEl.addEventListener("click", () => openPlaygroundPopover(competitionBannerEl));
+
+playgroundCloseBtn.addEventListener("click", () => {
+  playgroundPopoverEl.classList.add("hidden");
+  competitionBannerEl.setAttribute("aria-expanded", "false");
+});
+
+podiumRunTrialBtn.addEventListener("click", () => triggerTrialPulse("Starlight Harmony Trial"));
 
 vitalityCloseBtn.addEventListener("click", () => {
   vitalityPopoverEl.classList.add("hidden");
@@ -2345,6 +2571,32 @@ tabEventsBtn.addEventListener("click", () => {
   panelChaptersEl.classList.add("hidden");
 });
 
+evolveTraitsBtn.addEventListener("click", async () => {
+  tabChaptersBtn.click();
+  evolutionInsightBannerEl.textContent = "Testing gentle trait adaptations across the living genome…";
+  evolutionInsightBannerEl.classList.remove("hidden");
+  playHarmonicChime("spark");
+  triggerRipple("hub", "#a78bfa", 1.25);
+
+  try {
+    const res = await fetch("/api/pulse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ zone: "hub", spark: "Gentle evolutionary adaptation", kind: "evolve" }),
+    });
+    const result = await res.json().catch(() => ({}));
+    if (!res.ok || result.ok === false) throw new Error(result.error || "Evolution paused");
+    const msg = result.insight || result.acknowledgment || result.story || "Traits refined gracefully while preserving safety.";
+    evolutionInsightBannerEl.textContent = msg;
+    if (state.speechEnabled && result.spoken_reply) {
+      speakText(result.spoken_reply);
+    }
+    await refreshUniverse();
+  } catch (err) {
+    evolutionInsightBannerEl.textContent = err?.message || "Adaptation check paused for now.";
+  }
+});
+
 sparkForm.addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const message = sparkInputEl.value.trim();
@@ -2381,33 +2633,9 @@ sparkForm.addEventListener("submit", async (ev) => {
   }
 });
 
-startTrialBtn.addEventListener("click", async () => {
+startTrialBtn.addEventListener("click", () => {
   const customTitle = sparkInputEl.value.trim() || "Starlight Harmony Trial";
-  sparkFeedbackEl.textContent = "Opening a Playground Trial in Starlight Arena…";
-  triggerRipple("playground", "#f6c46d", 1.45);
-  triggerFilament("hub", "playground", "#ffdfa3");
-  playHarmonicChime("reward");
-
-  try {
-    const res = await fetch("/api/pulse", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ zone: "playground", spark: customTitle, kind: "competition" }),
-    });
-    const result = await res.json().catch(() => ({}));
-    if (!res.ok || result.ok === false) {
-      throw new Error(result.error || "Trial paused");
-    }
-    sparkInputEl.value = "";
-    sparkFeedbackEl.textContent =
-      result.acknowledgment || "A friendly Playground Trial has begun!";
-    if (state.speechEnabled && result.spoken_reply) {
-      speakText(result.spoken_reply);
-    }
-    await refreshUniverse();
-  } catch (err) {
-    sparkFeedbackEl.textContent = err?.message || "Could not start the Playground Trial right now.";
-  }
+  triggerTrialPulse(customTitle);
 });
 
 // ---------------------------------------------------------------------------

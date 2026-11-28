@@ -93,6 +93,10 @@ def test_observatory_demo_universe_beings_world_and_pulse(tmp_path: Path):
         assert len(world["paths"]) >= 5
         assert len(world["doors"]) >= 5
         assert world["competition"] is not None
+        assert "ticks_remaining" in world["competition"]
+        assert "podium" in world["competition"]
+        assert 0.0 <= world["daylight"] <= 1.0
+        assert "api_ms" in uni["perf"]
         assert len(uni["rewards_log"]) >= 1
 
         beings = uni["beings"]
@@ -169,6 +173,22 @@ def test_observatory_demo_universe_beings_world_and_pulse(tmp_path: Path):
             body={"zone": "hub", "body_id": "bb-gamma-scout", "target_zone": "hub", "kind": "move"},
         )
         assert code == 200 and mv_res["ok"] is True and mv_res["moved_to"] is not None
+
+        code, door_res = _http_json(
+            f"{base}/api/pulse",
+            method="POST",
+            body={"door_id": "door:hub:playground", "kind": "door"},
+        )
+        assert code == 200 and door_res["ok"] is True and door_res["door"]["state"] == "guarded"
+
+        code, evo_res = _http_json(
+            f"{base}/api/pulse",
+            method="POST",
+            body={"body_id": "bb-alpha-sentinel", "kind": "evolve"},
+        )
+        assert code == 200 and evo_res["ok"] is True
+        assert evo_res["champion"]["identity"].startswith("body-sentinel")
+        assert evo_res["insight"]
 
         # Invalid pulse rejected
         code, bad_pulse = _http_json(f"{base}/api/pulse", method="POST", body={"zone": "alpha-sector", "spark": "   "})
@@ -304,3 +324,41 @@ def test_embodied_anatomy_and_role_presets():
             assert part["role_story"]
         ch = Character.for_role(role)
         assert 0.0 <= ch.caution <= 1.0 and 0.0 <= ch.curiosity <= 1.0
+
+
+def test_observatory_parallel_incus_poller_cache(monkeypatch, tmp_path: Path):
+    import time
+
+    calls = {"list": 0, "exec": 0}
+    fake_containers = [
+        {"name": f"bb-alpha-{role}", "status": "Running", "state": {"memory": {"usage": 32 * 1024 * 1024}}}
+        for role in ("sentinel", "triage", "auditor", "executor")
+    ]
+
+    class _FakeProc:
+        def __init__(self, returncode: int, stdout: str) -> None:
+            self.returncode = returncode
+            self.stdout = stdout
+
+    def _fake_run(cmd, **_kwargs):
+        if cmd[:2] == ["incus", "list"]:
+            calls["list"] += 1
+            return _FakeProc(0, json.dumps(fake_containers))
+        if cmd[:2] == ["incus", "exec"]:
+            calls["exec"] += 1
+            time.sleep(0.05)
+            return _FakeProc(0, '{"role":"sentinel"}\n---SPLIT---\n{"tick":12,"cells":{},"hormones":{},"operating_mode":"ALERT"}\n---SPLIT---\n')
+        return _FakeProc(1, "")
+
+    monkeypatch.setattr("bigbang.observatory.subprocess.run", _fake_run)
+    backend = ObservatoryBackend(world_state_path=tmp_path / "missing_world.json", incus=True, incus_interval=1.0)
+    backend.poll_incus_once()
+    assert calls["list"] == 1 and calls["exec"] == 4
+
+    # Subsequent get_universe calls serve from atomic cache with zero extra incus subprocess calls
+    t0 = time.perf_counter()
+    uni = backend.get_universe()
+    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+    assert len(uni["beings"]) == 4
+    assert calls["list"] == 1 and calls["exec"] == 4
+    assert elapsed_ms < 250.0
