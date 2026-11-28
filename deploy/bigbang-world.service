@@ -1,0 +1,13 @@
+[Unit]
+Description=bigBangEnv Shared World Environment Daemon
+Documentation=https://github.com/pmwasim/bigBangEnv
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/bigbang/venv/bin/python -m bigbang world serve --state /var/lib/bigbang-world/world.json --host 0.0.0.0 --port 8787 --interval 2.0
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target

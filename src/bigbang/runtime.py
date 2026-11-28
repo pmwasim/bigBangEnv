@@ -59,6 +59,9 @@ class Runner:
         resume: bool = False,
         brain: Any = None,
         peer_secrets_file: str | Path | None = None,
+        world_url: str | None = None,
+        world_zone: str = "hub",
+        world_body_id: str | None = None,
     ):
         self.state = StateDir(state_dir)
         self.state.path.mkdir(parents=True, exist_ok=True)
@@ -70,13 +73,33 @@ class Runner:
 
         saved = self.state.read_json("config.json")
         self.config = saved if resume and saved else {**DEFAULT_CONFIG, **(config or {})}
-        ledger = Ledger(self.state.file("ledger.json"), auto_flush=False)
+        role = str(self.config.get("role", "general"))
+        w_url = world_url or self.config.get("world_url")
+        w_zone = world_zone if world_url else str(self.config.get("world_zone", world_zone))
+        self.world = None
+        body_id = world_body_id or self.config.get("world_body_id") or f"body-{role}"
+        if w_url:
+            from .world import WorldClient
+
+            self.world = WorldClient(w_url)
+            try:
+                self.world.enter(body_id, role=role, zone=w_zone)
+            except Exception:
+                pass  # allow boot even if World daemon starts after container
+
+        def _on_action(verb: str, payload: dict[str, Any]) -> None:
+            if self.world is not None and "issue" in payload:
+                self.world.act(body_id, int(payload["issue"]), verb=verb, label=payload.get("label"))
+
+        ledger = Ledger(self.state.file("ledger.json"), auto_flush=False, on_action=_on_action if self.world else None)
         self.genome = None
         self.organs = None
         if self.config.get("organism") == "body":
             self.kernel, self.ledger, self.genome, self.organs = build_body(
                 self.config, ledger=ledger, brain=brain
             )
+            if not world_body_id and not self.config.get("world_body_id"):
+                body_id = self.genome.identity
         else:
             self.kernel, self.ledger = build(self.config, ledger=ledger, brain=brain)
         secrets_path = peer_secrets_file or self.config.get("peer_secrets_file")
@@ -90,6 +113,8 @@ class Runner:
             issues_dir=issues_dir, commands_file=commands_file,
             issues_per_tick=self.config["issues_per_tick"],
             peer_secrets=peer_secrets,
+            world=self.world,
+            body_id=body_id,
         )
         if resume:
             self.kernel.restore(self.state.read_json("snapshot.json"))

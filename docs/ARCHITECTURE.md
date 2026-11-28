@@ -58,6 +58,7 @@
 | Stem mitosis, programmed apoptosis & catabolic recovery (`kernel.py`, `body.py`) | `_spawn_ephemeral`, `_apply_apoptosis`, `_recover_fuel` | `mitosis`, `apoptosis`, `catabolize` | `test_homeostasis_and_stem.py` |
 | Society outer Skin attestation, reputation & backpressure (`society.py`) | `Skin`, `WorldSociety`, `SensoryIngest` | `dropped` | `test_society.py` |
 | Bounded Genome evolution & live domain telemetry sensors (`evolution.py`, `sensors.py`) | `evolve_generation`, `collect_host_snapshot` | — | `test_evolution_and_sensors.py` |
+| Shared World space, topological Locality & ambient resources (`world.py`) | `SharedWorld`, `WorldClient`, `Zone` | `world_act`, `harvest` | `test_world.py` |
 | TTL decay | `step` | `expire` | `test_signals_expire_after_ttl` |
 | External kill switch | `halt` | `halt` | `test_kill_switch_stops_the_kernel` |
 | `KERNEL` trust never held by cells or input | `Cell`, `inject` | `ValueError` | `test_cells_cannot_hold_kernel_trust` |

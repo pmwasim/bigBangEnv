@@ -259,9 +259,16 @@ class Journal(Cell):
 class Ledger:
     """The caretaker's external world: issue labels and open/closed state."""
 
-    def __init__(self, path: str | Path | None = None, *, auto_flush: bool = True):
+    def __init__(
+        self,
+        path: str | Path | None = None,
+        *,
+        auto_flush: bool = True,
+        on_action: Any = None,
+    ):
         self.path = Path(path) if path else None
         self.auto_flush = auto_flush
+        self.on_action = on_action
         self._dirty = False
         self.data: dict[str, Any] = {"issues": {}, "history": []}
         if self.path and self.path.exists():
@@ -282,6 +289,11 @@ class Ledger:
         self._dirty = True
         if self.auto_flush:
             self.flush()
+        if self.on_action is not None:
+            try:
+                self.on_action(verb, payload)
+            except Exception:
+                pass  # external World sync failure must not crash deterministic Motor execution
 
     def label(self, payload: dict[str, Any]) -> dict[str, Any]:
         issue = self._issue(payload["issue"])
@@ -320,18 +332,60 @@ class Host:
         commands_file: str | Path | None = None,
         issues_per_tick: int = 3,
         peer_secrets: dict[str, str] | None = None,
+        world: Any = None,
+        body_id: str | None = None,
     ):
         self.commands = list(commands or [])
         self.issues_dir = Path(issues_dir) if issues_dir else None
         self.commands_file = Path(commands_file) if commands_file else None
         self.issues_per_tick = issues_per_tick
         self.peer_secrets = dict(peer_secrets or {})
+        self.world = world
+        self.body_id = body_id
         # Persisted between sessions: issues read but not yet injected, files
         # already read, and how many command lines were consumed.
-        self.state: dict[str, Any] = {"pending": list(issues or []), "command_cursor": 0, "ingested_files": []}
+        self.state: dict[str, Any] = {
+            "pending": list(issues or []),
+            "command_cursor": 0,
+            "ingested_files": [],
+            "world_seen_ids": [],
+        }
         self._ingested_set: set[str] = set()
+        self._world_seen_set: set[int] = set()
         self._last_issues_stamp: tuple[int, int] | None = None
         self._last_commands_stamp: tuple[int, int, int] | None = None
+
+    def _pull_world(self) -> None:
+        if self.world is None or not self.body_id:
+            return
+        seen_list = self.state.setdefault("world_seen_ids", [])
+        if len(self._world_seen_set) != len(seen_list):
+            self._world_seen_set = set(seen_list)
+        try:
+            sensed = self.world.sense(self.body_id)
+        except Exception:
+            return
+        for obj in sensed.get("objects", []):
+            iid = int(obj["issue_id"])
+            if iid in self._world_seen_set:
+                continue
+            self._world_seen_set.add(iid)
+            seen_list.append(iid)
+            if len(seen_list) > 5000:
+                self._world_seen_set.discard(seen_list.pop(0))
+            if obj.get("kind") == "reagent":
+                self.state["pending"].append({
+                    "topic": "world.reagent",
+                    "payload": {"kind": "symptom", "id": iid, "title": obj["title"], "body": obj.get("body", "")},
+                    "risk": float(obj.get("risk", 0.1)),
+                })
+            else:
+                self.state["pending"].append({
+                    "id": iid,
+                    "title": obj["title"],
+                    "body": obj.get("body", ""),
+                    "zone": obj.get("zone"),
+                })
 
     def _pull_files(self) -> None:
         if len(self._ingested_set) != len(self.state["ingested_files"]):
@@ -365,6 +419,7 @@ class Host:
         from ..society import Skin
 
         self._pull_files()
+        self._pull_world()
         batch = self.state["pending"][:self.issues_per_tick]
         self.state["pending"] = self.state["pending"][self.issues_per_tick:]
         for item in batch:

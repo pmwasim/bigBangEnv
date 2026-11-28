@@ -35,6 +35,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     runner = Runner(
         args.state, config=config, issues_dir=args.issues, commands_file=args.commands,
         resume=args.resume, peer_secrets_file=args.peer_secrets,
+        world_url=args.world, world_zone=args.zone, world_body_id=args.body_id,
     )
     ticks = None if args.forever else args.ticks
     _print(runner.run(ticks, interval=args.interval))
@@ -133,6 +134,52 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_world(args: argparse.Namespace) -> int:
+    import signal
+    import threading
+    import time
+    from .world import SharedWorld, WorldClient, make_world_server
+
+    if args.action == "serve":
+        world = SharedWorld(state_path=args.state)
+        srv = make_world_server(world, host=args.host, port=args.port)
+        stop = threading.Event()
+        print(json.dumps({"serving": f"http://{args.host}:{args.port}", "tick": world.tick, "zones": sorted(world.zones)}), flush=True)
+
+        def _ticker() -> None:
+            while not stop.wait(args.interval):
+                world.step(1)
+
+        t = threading.Thread(target=_ticker, daemon=True)
+        t.start()
+
+        def _shutdown(_signum: int, _frame: Any) -> None:
+            stop.set()
+            threading.Thread(target=srv.shutdown, daemon=True).start()
+
+        signal.signal(signal.SIGTERM, _shutdown)
+        try:
+            srv.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            stop.set()
+            world.save()
+            srv.server_close()
+        return 0
+
+    client = WorldClient(args.url)
+    if args.action == "status":
+        _print(client.summary())
+    elif args.action == "spawn":
+        _print(client.spawn_entity(args.zone, kind=args.kind, title=args.title, body=args.body, risk=args.risk))
+    elif args.action == "move":
+        _print(client.move(args.body_id, args.zone))
+    elif args.action == "step":
+        _print(client.step(args.ticks))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="bigbang", description=__doc__)
     parser.add_argument("--version", action="version", version=f"bigbang {__version__}")
@@ -156,6 +203,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--interval", type=float, default=0.0, help="seconds to sleep between ticks")
     run.add_argument("--resume", action="store_true", help="continue an existing organism")
     run.add_argument("--peer-secrets", help="optional JSON file of peer Skin secrets for signed peer.signal")
+    run.add_argument("--world", help="optional SharedWorld HTTP base URL (e.g. http://10.99.1.1:8787)")
+    run.add_argument("--zone", default="hub", help="initial Zone in the SharedWorld")
+    run.add_argument("--body-id", help="explicit Body identifier inside the SharedWorld")
     run.set_defaults(func=cmd_run)
 
     st = sub.add_parser("status", help="show an organism's state")
@@ -207,6 +257,22 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--seq", type=int, default=1)
     pr.add_argument("--out", help="optional issues_dir to write signal JSON files")
     pr.set_defaults(func=cmd_probe)
+
+    wd = sub.add_parser("world", help="run or query the SharedWorld environment")
+    wd.add_argument("action", choices=["serve", "status", "spawn", "move", "step"])
+    wd.add_argument("--state", default="./world.json", help="world persistence path for serve")
+    wd.add_argument("--host", default="127.0.0.1")
+    wd.add_argument("--port", type=int, default=8787)
+    wd.add_argument("--url", default="http://127.0.0.1:8787")
+    wd.add_argument("--zone", default="alpha-sector")
+    wd.add_argument("--kind", default="incident")
+    wd.add_argument("--title", default="[bug] world anomaly")
+    wd.add_argument("--body", default="")
+    wd.add_argument("--body-id", default="body-sentinel")
+    wd.add_argument("--risk", type=float, default=0.1)
+    wd.add_argument("--ticks", type=int, default=1)
+    wd.add_argument("--interval", type=float, default=2.0, help="seconds per world tick when serving")
+    wd.set_defaults(func=cmd_world)
     return parser
 
 

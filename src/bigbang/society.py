@@ -138,7 +138,10 @@ def should_backpressure(target_status: dict[str, Any], paused: bool) -> bool:
 class WorldSociety:
     """Multi-Body coordinator enforcing Skin verification, reputation, territory mutex, and backpressure."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, world: Any = None) -> None:
+        from .world import SharedWorld
+
+        self.world: SharedWorld = world if world is not None else SharedWorld()
         self.bodies: dict[str, dict[str, Any]] = {}
         self.skins: dict[str, Skin] = {}
         self.secrets: dict[str, str] = {}
@@ -156,12 +159,14 @@ class WorldSociety:
         organs: dict[str, Any],
         *,
         secret: str,
+        zone: str = "hub",
     ) -> Skin:
         ident = genome.identity
         skin = Skin(ident, secret)
         self.bodies[ident] = {"kernel": kernel, "ledger": ledger, "genome": genome, "organs": organs}
         self.skins[ident] = skin
         self.secrets[ident] = secret
+        self.world.enter(ident, role=genome.role, zone=zone)
         return skin
 
     def relay(
@@ -220,6 +225,7 @@ class WorldSociety:
 
     def step_all(self, ticks: int = 1) -> None:
         for _ in range(ticks):
+            self.world.step(1)
             for (source, target) in list(self._outboxes):
                 if self._outboxes[(source, target)]:
                     self.flush_link(source, target)
