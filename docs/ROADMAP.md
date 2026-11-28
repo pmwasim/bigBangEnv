@@ -58,6 +58,12 @@ M1's exit criteria are met (ADR-0008). Still deferred until there is an API budg
 - [x] Chemistry bridge (`chemistry.py`): stoichiometric bonding, $E_a$ barriers, zero-consumption `Catalyst`, Le Chatelier equilibrium, `toxicity_ph`
 - [x] Stem mitosis, programmed apoptosis, exothermic catabolism, and endogenous homeostatic drives (ADR-0015)
 
-## Next — Society & Civilization *(Level 7)*
+## M5 — Society & Civilization *(Level 7)* — **done**
 
-Multiple bodies in a shared world kernel: signed outer `Skin` & peer attestation, upstream hormonal backpressure, resource arbitrage, and governance.
+- [x] Cryptographic outer `Skin` & HMAC peer attestation (`society.py`) with `peer.signal` trust gating
+- [x] `ReputationLedger` peer trust decay/reward and `TerritoryTable` mutual-exclusion claims
+- [x] Schmitt-trigger cross-Body hormonal backpressure in `WorldSociety` and `bigbang-mesh.py`
+
+## Later — Genetics, Evolution & Live Domain Sensors
+
+Autonomous `Genome` mutation/selection loop across benchmarked workloads and domain-native VM/system telemetry sensors.

@@ -58,20 +58,32 @@ class SensoryIngest(Cell):
         super().__init__(name, **kw)
         self.max_seen = max_seen
         self._seen_set: set[int] = set()
-        self.memory.update(seen=[], seen_total=0, dropped=0, backlog=[], max_backlog=0, molecules=[])
+        self.memory.update(
+            seen=[], seen_total=0, dropped=0, backlog=[], max_backlog=0, molecules=[],
+            peer_accepted=0, peer_rejected=0,
+        )
 
     def step(self, ctx: Context) -> None:
         seen_list = self.memory["seen"]
         if len(self._seen_set) != len(seen_list):
             self._seen_set = set(seen_list)
         if "seen_total" not in self.memory:
-            self.memory["seen_total"] = len(seen_list)
+            self._seen_set_tot = len(seen_list)
+            self.memory["seen_total"] = self._seen_set_tot
+        if "peer_accepted" not in self.memory:
+            self.memory["peer_accepted"] = 0
+            self.memory["peer_rejected"] = 0
 
         store = MatterStore.from_list(self.memory.get("molecules", []), max_molecules=256)
         store.decay(ctx.tick)
 
         fresh = []
         for signal in ctx.inbox:
+            if signal.topic == "peer.signal" and signal.trust < Trust.USER:
+                self.memory["dropped"] += 1
+                self.memory["peer_rejected"] += 1
+                ctx.emit_gradient("friction", 0.3)
+                continue
             issue = signal.payload
             ok = (
                 isinstance(issue, dict)
@@ -84,8 +96,12 @@ class SensoryIngest(Cell):
             )
             if not ok or issue["id"] in self._seen_set:
                 self.memory["dropped"] += 1
+                if signal.topic == "peer.signal":
+                    self.memory["peer_rejected"] += 1
                 ctx.emit_gradient("friction", 0.2)
                 continue
+            if signal.topic == "peer.signal":
+                self.memory["peer_accepted"] += 1
             self._seen_set.add(issue["id"])
             seen_list.append(issue["id"])
             self.memory["seen_total"] += 1
@@ -830,6 +846,10 @@ def body_report(kernel: Kernel, ledger: Ledger, genome: Genome, organs: dict[str
             "mitoses": int(events.get("mitosis", 0)),
             "apoptoses": int(events.get("apoptosis", 0)),
             "stem_spawned": int(stem.get("spawned_total", 0)),
+        },
+        "society": {
+            "peer_accepted": int(ingest.get("peer_accepted", 0)),
+            "peer_rejected": int(ingest.get("peer_rejected", 0)),
         },
         "work_energy": round(work_energy, 3),
         "dormant": sorted(kernel.dormant),

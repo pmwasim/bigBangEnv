@@ -10,8 +10,8 @@ Today's "AI agents" are stateless reasoning engines in a loop, with safety bolte
 
 - **M0 — Genesis kernel: done.** Deterministic ticks, kernel-stamped trust and taint, topic floors, capabilities, declassification, metered energy with dormancy and wake, fail-safe inhibition, atomic steps with quarantine, kill switch, snapshot/restore, replay.
 - **M1 — First organism: done.** The *repo caretaker* triages issues and executes owner commands, with sensory, reflex, reasoning, defense and motor cells and a pluggable brain (rule, offline or Claude).
-- **M2–M4 — Physics, Chemistry, Organs & Unified Body: done.** 5-organ `Body` with immutable `Genome`, `Physics` (`ChargeVector`, `EnergyTensor`, 4 forces), `Chemistry` (`ReactionChamber`, catalysis, equilibrium), `MyelinCompiler`, `StemCell` mitosis/apoptosis, and `SLEEP_REM` catabolism (ADRs 0011–0015).
-- **Next: Society & Civilization ([roadmap](docs/ROADMAP.md#next--society--civilization-level-7)).** Cryptographic `Skin` attestation, inter-body hormonal backpressure, and shared ecology.
+- **M2–M5 — Physics, Chemistry, Biology & Society: done.** 5-organ `Body` with immutable `Genome`, `Physics` (`ChargeVector`, `EnergyTensor`, 4 forces), `Chemistry` (`ReactionChamber`, catalysis, equilibrium), `MyelinCompiler`, `StemCell` mitosis/apoptosis, `SLEEP_REM` catabolism, cryptographic `Skin`, `ReputationLedger`, and peer backpressure (ADRs 0011–0016).
+- **Next: Genetics & Live Domain Sensors ([roadmap](docs/ROADMAP.md#later--genetics-evolution--live-domain-sensors)).** Autonomous `Genome` evolution and host telemetry sensors.
 
 ### M1 results ([full report](docs/EVALUATION.md))
 
