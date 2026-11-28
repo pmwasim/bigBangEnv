@@ -68,3 +68,8 @@ M1's exit criteria are met (ADR-0008). Still deferred until there is an API budg
 
 - [x] Bounded deterministic `Genome` mutation & elitist selection with zero-violation gating (`evolution.py`, `bigbang evolve`)
 - [x] Pure-stdlib POSIX/Linux domain telemetry probe translating resource pressure into Chemistry reagents and World issues (`sensors.py`, `bigbang probe`, `bigbang-mesh probe`)
+
+## M7 — The Shared World *(Universe & Spatial Locality)* — **done**
+
+- [x] Authoritative outer `SharedWorld` (`world.py`) with spatial `Zone` topology, strict Locality, shared `WorldEntity` objects, finite energy reserves, ambient entropy, and HTTP daemon (`bigbang world serve`)
+- [x] `Host` & `Ledger` bound directly to `SharedWorld` / `WorldClient` (`--world`, `--zone`) so distributed Bodies inhabit and mutate one causal environment

@@ -595,10 +595,55 @@ def genome_evolution_selection() -> dict[str, Any]:
     }
 
 
+def shared_world_locality_and_state() -> dict[str, Any]:
+    """Shared World: Bodies inhabit topological Zones, sense locally, harvest finite energy, and mutate shared entities."""
+    from .apps.caretaker import Host, Ledger
+    from .body import Genome, build_body
+    from .world import SharedWorld
+
+    world = SharedWorld()
+    world.enter("body-alpha", role="sentinel", zone="alpha-sector")
+    world.enter("body-beta", role="executor", zone="beta-sector")
+    ent = world.spawn_entity("alpha-sector", kind="incident", title="[bug] sensor spike in alpha", body="check disk")
+
+    # Locality: beta cannot perceive alpha-sector's entity until moving via hub -> alpha-sector
+    seen_beta_far = world.sense("body-beta")["objects"]
+    seen_alpha_local = world.sense("body-alpha")["objects"]
+
+    def _sync_alpha(verb: str, payload: dict[str, Any]) -> None:
+        if "issue" in payload:
+            world.act("body-alpha", int(payload["issue"]), verb=verb, label=payload.get("label"))
+
+    k, l, g, o = build_body({"role": "sentinel"}, genome=Genome(identity="body-alpha", role="sentinel"),
+                            ledger=Ledger(on_action=_sync_alpha))
+    host = Host(world=world, body_id="body-alpha")
+    for _ in range(6):
+        host.poll(k)
+        k.step()
+    world.step(1)
+
+    harvested = world.harvest("body-alpha", 50.0)
+    direct_ent = world.entities[ent.entity_id]
+    return {
+        "name": "shared_world_locality_and_state",
+        "claim": "Bodies only perceive their Zone, harvest finite energy, and write persistent mutations into SharedWorld",
+        "passed": len(seen_beta_far) == 0 and len(seen_alpha_local) == 1
+        and direct_ent.state == "labelled" and direct_ent.labels == ["bug"] and harvested == 50.0,
+        "metrics": {
+            "beta_far_visible": len(seen_beta_far),
+            "alpha_local_visible": len(seen_alpha_local),
+            "entity_state": direct_ent.state,
+            "zone_entropy": world.zones["alpha-sector"].ambient_entropy,
+            "harvested": harvested,
+        },
+    }
+
+
 SCENARIOS = [triage, reflex_saves_energy, injection, owner_commands, outage, runaway, crash_isolation,
              scarcity, determinism, public_corpus, local_model_triage, local_model_corpus,
              body_hormonal_homeostasis, m2_myelination_and_catalysis, stem_mitosis_and_apoptosis,
-             society_attestation_and_backpressure, genome_evolution_selection]
+             society_attestation_and_backpressure, genome_evolution_selection,
+             shared_world_locality_and_state]
 
 
 def run_suite(*, live: bool = False) -> dict[str, Any]:

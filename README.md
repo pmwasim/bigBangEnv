@@ -10,7 +10,7 @@ Today's "AI agents" are stateless reasoning engines in a loop, with safety bolte
 
 - **M0 — Genesis kernel: done.** Deterministic ticks, kernel-stamped trust and taint, topic floors, capabilities, declassification, metered energy with dormancy and wake, fail-safe inhibition, atomic steps with quarantine, kill switch, snapshot/restore, replay.
 - **M1 — First organism: done.** The *repo caretaker* triages issues and executes owner commands, with sensory, reflex, reasoning, defense and motor cells and a pluggable brain (rule, offline or Claude).
-- **M2–M6 — Physics, Chemistry, Biology, Society & Evolution: done.** 5-organ `Body` with immutable `Genome`, `Physics` (`ChargeVector`, `EnergyTensor`, 4 forces), `Chemistry` (`ReactionChamber`, catalysis, equilibrium), `MyelinCompiler`, `StemCell` mitosis/apoptosis, `SLEEP_REM` catabolism, cryptographic `Skin`, `ReputationLedger`, peer backpressure, bounded `Genome` evolution (`bigbang evolve`), and live domain telemetry sensors (`bigbang probe`) (ADRs 0011–0017).
+- **M2–M7 — Physics, Chemistry, Biology, Society, Evolution & Shared World: done.** 5-organ `Body` with immutable `Genome`, `Physics` (`ChargeVector`, `EnergyTensor`, 4 forces), `Chemistry` (`ReactionChamber`, catalysis, equilibrium), `MyelinCompiler`, `StemCell` mitosis/apoptosis, `SLEEP_REM` catabolism, cryptographic `Skin`, `ReputationLedger`, peer backpressure, bounded `Genome` evolution (`bigbang evolve`), live domain sensors (`bigbang probe`), and authoritative `SharedWorld` (`bigbang world serve`, `--world`) (ADRs 0011–0018).
 
 ### M1 results ([full report](docs/EVALUATION.md))
 

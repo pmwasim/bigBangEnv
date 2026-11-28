@@ -333,6 +333,23 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_world_status(args: argparse.Namespace) -> int:
+    out = run_cmd(["/opt/bigbang/venv/bin/python", "-m", "bigbang", "world", "status", "--url", args.url], check=False)
+    if not out:
+        out = run_cmd(["incus", "exec", "bb-alpha-sentinel", "--", "/opt/bigbang/venv/bin/python", "-m", "bigbang", "world", "status", "--url", args.url])
+    print(out)
+    return 0
+
+
+def cmd_world_spawn(args: argparse.Namespace) -> int:
+    out = run_cmd([
+        "incus", "exec", "bb-alpha-sentinel", "--", "/opt/bigbang/venv/bin/python", "-m", "bigbang",
+        "world", "spawn", "--url", args.url, "--zone", args.zone, "--kind", args.kind, "--title", args.title, "--body", args.body,
+    ])
+    print(out)
+    return 0
+
+
 def cmd_probe_loop(args: argparse.Namespace) -> int:
     """Continuously probe a container's host metrics at interval seconds."""
     c_name = args.container
@@ -459,6 +476,16 @@ def main() -> int:
 
     sub.add_parser("provision-keys", help="Provision cryptographic Skin HMAC peer keys across running mesh")
 
+    ws = sub.add_parser("world-status", help="Inspect SharedWorld status")
+    ws.add_argument("--url", default="http://10.99.1.1:8787")
+
+    wsp = sub.add_parser("world-spawn", help="Spawn a persistent entity inside a SharedWorld zone")
+    wsp.add_argument("--url", default="http://10.99.1.1:8787")
+    wsp.add_argument("--zone", default="alpha-sector")
+    wsp.add_argument("--kind", default="incident")
+    wsp.add_argument("--title", required=True)
+    wsp.add_argument("--body", default="")
+
     args = parser.parse_args()
     if args.command == "list":
         return cmd_list(args)
@@ -482,6 +509,10 @@ def main() -> int:
         return cmd_probe_daemon(args)
     elif args.command == "provision-keys":
         return cmd_provision_keys(args)
+    elif args.command == "world-status":
+        return cmd_world_status(args)
+    elif args.command == "world-spawn":
+        return cmd_world_spawn(args)
     return 0
 
 
