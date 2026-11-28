@@ -58,6 +58,7 @@ class Runner:
         commands_file: str | Path | None = None,
         resume: bool = False,
         brain: Any = None,
+        peer_secrets_file: str | Path | None = None,
     ):
         self.state = StateDir(state_dir)
         self.state.path.mkdir(parents=True, exist_ok=True)
@@ -78,9 +79,17 @@ class Runner:
             )
         else:
             self.kernel, self.ledger = build(self.config, ledger=ledger, brain=brain)
+        secrets_path = peer_secrets_file or self.config.get("peer_secrets_file")
+        peer_secrets: dict[str, str] = {}
+        if secrets_path and Path(secrets_path).exists():
+            peer_secrets = {
+                str(k): str(v)
+                for k, v in json.loads(Path(secrets_path).read_text(encoding="utf-8")).items()
+            }
         self.host = Host(
             issues_dir=issues_dir, commands_file=commands_file,
             issues_per_tick=self.config["issues_per_tick"],
+            peer_secrets=peer_secrets,
         )
         if resume:
             self.kernel.restore(self.state.read_json("snapshot.json"))

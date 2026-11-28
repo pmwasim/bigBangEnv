@@ -152,14 +152,36 @@ def _should_backpressure(target_status: dict[str, Any], paused: bool) -> bool:
     return fuel <= 0.35 or stress >= 0.55
 
 
+def _seal_envelope(identity: str, secret: str, payload: dict[str, Any], seq: int) -> dict[str, Any]:
+    import hashlib
+    import hmac
+
+    body = {"from": identity, "seq": int(seq), "affinity": "*", "payload": payload}
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    sig = hmac.new(secret.encode("utf-8"), canonical, hashlib.sha256).hexdigest()
+    return {**body, "sig": sig}
+
+
+def _load_peer_secrets(path: Path = Path("/etc/bigbang/peer_secrets.json")) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    try:
+        return {str(k): str(v) for k, v in json.loads(path.read_text(encoding="utf-8")).items()}
+    except Exception:
+        return {}
+
+
 def cmd_relay_loop(args: argparse.Namespace) -> int:
     """Continuous synaptic relay forwarding verified Motor outcomes from source -> target."""
     source_c, target_c = args.source, args.target
     cursor_file = Path(f"/tmp/bigbang_relay_{source_c}_to_{target_c}.cursor")
     cursor = int(cursor_file.read_text()) if cursor_file.exists() else 0
     paused = False
+    secrets = _load_peer_secrets()
+    source_role = source_c.split("-", 2)[2] if len(source_c.split("-", 2)) > 2 else source_c
+    sender_id = f"body-{source_role}" if f"body-{source_role}" in secrets else source_c
 
-    print(f"[*] Synaptic relay live: {source_c} (cursor={cursor}) -> {target_c}")
+    print(f"[*] Synaptic relay live: {source_c} (cursor={cursor}, signed={sender_id in secrets}) -> {target_c}")
     while True:
         try:
             t_raw = run_cmd([
@@ -187,14 +209,20 @@ def cmd_relay_loop(args: argparse.Namespace) -> int:
                     entry = history[cursor]
                     cursor += 1
                     cursor_file.write_text(str(cursor))
-                    # Forward non-trivial actions into target Body's sensory ingress
                     relay_id = 100_000 + cursor
                     label = entry.get("label", entry.get("verb", "event"))
-                    payload = {
+                    inner = {
                         "id": relay_id,
                         "title": f"[{label}] peer relay from {source_c} (issue #{entry.get('issue')})",
                         "body": f"Verified {entry.get('verb')} from {source_c}: {json.dumps(entry)}",
                     }
+                    if sender_id in secrets:
+                        payload: dict[str, Any] = {
+                            "topic": "peer.signal",
+                            "envelope": _seal_envelope(sender_id, secrets[sender_id], inner, cursor),
+                        }
+                    else:
+                        payload = inner
                     fname = f"synapse_{source_c}_{relay_id:06d}.json"
                     encoded = json.dumps(payload).replace("'", "'\\''")
                     run_cmd([
@@ -305,6 +333,72 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_probe_loop(args: argparse.Namespace) -> int:
+    """Continuously probe a container's host metrics at interval seconds."""
+    c_name = args.container
+    print(f"[*] Telemetry probe loop live for {c_name} every {args.interval}s")
+    while True:
+        try:
+            seq = int(time.time()) % 1_000_000
+            run_cmd([
+                "incus", "exec", c_name, "--", "bash", "-lc",
+                f"/opt/bigbang/venv/bin/python -m bigbang probe --seq {seq} --out /var/lib/bigbang/issues && chown -R bigbang:bigbang /var/lib/bigbang/issues"
+            ])
+        except Exception as exc:
+            print(f"[!] Probe warning for {c_name}: {exc}", file=sys.stderr)
+        time.sleep(args.interval)
+
+
+def cmd_probe_daemon(args: argparse.Namespace) -> int:
+    """Start persistent systemd-run telemetry probe daemon for a Body container."""
+    c_name = args.container
+    unit_name = f"bigbang-probe-{c_name}"
+    run_cmd(["sudo", "systemctl", "stop", unit_name], check=False)
+    run_cmd([
+        "sudo", "systemd-run", "--unit", unit_name,
+        "--description", f"bigBangEnv Live Domain Telemetry Probe for {c_name}",
+        sys.executable, str(Path(__file__).resolve()),
+        "probe-loop", c_name, "--interval", str(args.interval)
+    ])
+    print(f"[✓] Telemetry probe daemon {unit_name} active (interval={args.interval}s).")
+    return 0
+
+
+def cmd_provision_keys(args: argparse.Namespace) -> int:
+    """Generate and distribute Skin HMAC peer secrets securely (0640) without printing key material."""
+    import secrets as _secrets
+
+    containers = [c for c in get_incus_containers() if c["name"].startswith("bb-")]
+    host_path = Path("/etc/bigbang/peer_secrets.json")
+    existing = _load_peer_secrets(host_path)
+    updated = dict(existing)
+    for c in containers:
+        name = c["name"]
+        parts = name.split("-", 2)
+        role = parts[2] if len(parts) > 2 else name
+        for ident in (name, f"body-{role}"):
+            if ident not in updated:
+                updated[ident] = _secrets.token_hex(32)
+
+    tmp = Path("/tmp/peer_secrets.json.tmp")
+    tmp.write_text(json.dumps(updated, sort_keys=True), encoding="utf-8")
+    run_cmd(["sudo", "mkdir", "-p", "/etc/bigbang"])
+    run_cmd(["sudo", "install", "-m", "0600", "-o", "root", "-g", "root", str(tmp), str(host_path)])
+
+    for c in containers:
+        name = c["name"]
+        if c["status"] != "Running":
+            continue
+        run_cmd(["incus", "file", "push", str(tmp), f"{name}/etc/bigbang/peer_secrets.json"])
+        run_cmd([
+            "incus", "exec", name, "--", "bash", "-lc",
+            "chown root:bigbang /etc/bigbang/peer_secrets.json && chmod 0640 /etc/bigbang/peer_secrets.json"
+        ])
+    tmp.unlink(missing_ok=True)
+    print(f"[✓] Provisioned Skin peer_secrets for {len(containers)} containers ({len(updated)} identities).")
+    return 0
+
+
 def cmd_trace(args: argparse.Namespace) -> int:
     c_name = args.container
     tail = args.tail
@@ -355,6 +449,16 @@ def main() -> int:
     probe = sub.add_parser("probe", help="Collect live host telemetry inside a Body container")
     probe.add_argument("container", help="Target container name (e.g. bb-alpha-sentinel)")
 
+    ploop = sub.add_parser("probe-loop", help="Foreground telemetry probe loop")
+    ploop.add_argument("container")
+    ploop.add_argument("--interval", type=float, default=60.0)
+
+    pdaemon = sub.add_parser("probe-daemon", help="Start persistent systemd-run telemetry probe daemon")
+    pdaemon.add_argument("container")
+    pdaemon.add_argument("--interval", type=float, default=60.0)
+
+    sub.add_parser("provision-keys", help="Provision cryptographic Skin HMAC peer keys across running mesh")
+
     args = parser.parse_args()
     if args.command == "list":
         return cmd_list(args)
@@ -372,6 +476,12 @@ def main() -> int:
         return cmd_route(args)
     elif args.command == "probe":
         return cmd_probe(args)
+    elif args.command == "probe-loop":
+        return cmd_probe_loop(args)
+    elif args.command == "probe-daemon":
+        return cmd_probe_daemon(args)
+    elif args.command == "provision-keys":
+        return cmd_provision_keys(args)
     return 0
 
 
