@@ -529,9 +529,48 @@ def stem_mitosis_and_apoptosis() -> dict[str, Any]:
     }
 
 
+def society_attestation_and_backpressure() -> dict[str, Any]:
+    """Level 7 Society: Skin attestation accepts peers, rejects forgeries, and honors backpressure."""
+    from .body import Genome, build_body
+    from .society import Skin, WorldSociety
+
+    soc = WorldSociety()
+    k1, l1, g1, o1 = build_body({"role": "sender"}, genome=Genome(identity="body-sender", role="sender"))
+    k2, l2, g2, o2 = build_body({"role": "receiver"}, genome=Genome(identity="body-receiver", role="receiver"))
+    soc.register(k1, l1, g1, o1, secret="alpha-secret")
+    soc.register(k2, l2, g2, o2, secret="beta-secret")
+
+    # 1. Valid signed peer relay arrives and is processed
+    res_ok = soc.relay("body-sender", "body-receiver", {"id": 1, "title": "[bug] peer alert", "body": "close 1"})
+    # 2. Forged envelope claiming to be sender is rejected and dropped by SensoryIngest
+    spoof = Skin("body-sender", "wrong-key").seal({"id": 2, "title": "[bug] spoof", "body": ""}, seq=99)
+    res_bad = soc.relay("body-sender", "body-receiver", {}, envelope=spoof)
+    # 3. Territory mutex allows one owner at a time
+    lock1 = soc.territory.claim("resource:db", "body-sender", tick=1, ttl=5)
+    lock2 = soc.territory.claim("resource:db", "body-receiver", tick=1, ttl=5)
+    soc.step_all(6)
+
+    rep2 = o2 and l2.data["issues"]
+    rec_mem = k2.cells["perception.ingest"].memory
+    return {
+        "name": "society_attestation_and_backpressure",
+        "claim": "society Skin rejects forged peer signals, enforces territory locks, and delivers valid relays",
+        "passed": res_ok["status"] == "delivered" and res_bad["status"] == "rejected"
+        and lock1 and not lock2 and "1" in rep2 and "2" not in rep2
+        and rec_mem["peer_accepted"] == 1 and rec_mem["peer_rejected"] >= 1,
+        "metrics": {
+            "peer_accepted": rec_mem["peer_accepted"],
+            "peer_rejected": rec_mem["peer_rejected"],
+            "sender_reputation": soc.reputation.score("body-sender"),
+            "territory_mutex": lock1 and not lock2,
+        },
+    }
+
+
 SCENARIOS = [triage, reflex_saves_energy, injection, owner_commands, outage, runaway, crash_isolation,
              scarcity, determinism, public_corpus, local_model_triage, local_model_corpus,
-             body_hormonal_homeostasis, m2_myelination_and_catalysis, stem_mitosis_and_apoptosis]
+             body_hormonal_homeostasis, m2_myelination_and_catalysis, stem_mitosis_and_apoptosis,
+             society_attestation_and_backpressure]
 
 
 def run_suite(*, live: bool = False) -> dict[str, Any]:

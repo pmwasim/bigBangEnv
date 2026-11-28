@@ -138,15 +138,44 @@ systemctl enable --now bigbang.service
     return 0
 
 
+def _should_backpressure(target_status: dict[str, Any], paused: bool) -> bool:
+    """Schmitt-trigger hysteresis: throttle upstream relay when downstream Body is saturated."""
+    if target_status.get("halted"):
+        return True
+    if target_status.get("operating_mode", "ALERT") in ("LOCKDOWN", "DORMANT"):
+        return True
+    hormones = target_status.get("hormones", {})
+    fuel = float(hormones.get("fuel", 1.0))
+    stress = float(hormones.get("stress", 0.0))
+    if paused:
+        return not (fuel >= 0.60 and stress <= 0.35)
+    return fuel <= 0.35 or stress >= 0.55
+
+
 def cmd_relay_loop(args: argparse.Namespace) -> int:
     """Continuous synaptic relay forwarding verified Motor outcomes from source -> target."""
     source_c, target_c = args.source, args.target
     cursor_file = Path(f"/tmp/bigbang_relay_{source_c}_to_{target_c}.cursor")
     cursor = int(cursor_file.read_text()) if cursor_file.exists() else 0
+    paused = False
 
     print(f"[*] Synaptic relay live: {source_c} (cursor={cursor}) -> {target_c}")
     while True:
         try:
+            t_raw = run_cmd([
+                "incus", "exec", target_c, "--",
+                "/opt/bigbang/venv/bin/python", "-m", "bigbang", "status", "--state", "/var/lib/bigbang/state"
+            ], check=False)
+            if t_raw:
+                t_stat = json.loads(t_raw)
+                new_paused = _should_backpressure(t_stat, paused)
+                if new_paused != paused:
+                    print(f"[{'⏸' if new_paused else '▶'}] Backpressure {source_c}->{target_c}: {paused} -> {new_paused}")
+                paused = new_paused
+            if paused:
+                time.sleep(args.interval)
+                continue
+
             raw = run_cmd([
                 "incus", "exec", source_c, "--",
                 "cat", "/var/lib/bigbang/state/ledger.json"
@@ -234,6 +263,9 @@ def cmd_route(args: argparse.Namespace) -> int:
             "/opt/bigbang/venv/bin/python", "-m", "bigbang", "status", "--state", "/var/lib/bigbang/state"
         ], check=False)
         stat = json.loads(raw) if raw else {}
+        if _should_backpressure(stat, False):
+            print(f"  candidate={name:<20} skipped (backpressure)")
+            continue
         phys = stat.get("physics", {})
         mass = float(phys.get("gravitational_mass", 1.0))
         heat = float(phys.get("entropy", 0.0))

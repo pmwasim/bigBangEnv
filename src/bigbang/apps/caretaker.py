@@ -319,11 +319,13 @@ class Host:
         issues_dir: str | Path | None = None,
         commands_file: str | Path | None = None,
         issues_per_tick: int = 3,
+        peer_secrets: dict[str, str] | None = None,
     ):
         self.commands = list(commands or [])
         self.issues_dir = Path(issues_dir) if issues_dir else None
         self.commands_file = Path(commands_file) if commands_file else None
         self.issues_per_tick = issues_per_tick
+        self.peer_secrets = dict(peer_secrets or {})
         # Persisted between sessions: issues read but not yet injected, files
         # already read, and how many command lines were consumed.
         self.state: dict[str, Any] = {"pending": list(issues or []), "command_cursor": 0, "ingested_files": []}
@@ -360,11 +362,34 @@ class Host:
                 self.commands = lines
 
     def poll(self, kernel: Kernel) -> None:
+        from ..society import Skin
+
         self._pull_files()
         batch = self.state["pending"][:self.issues_per_tick]
         self.state["pending"] = self.state["pending"][self.issues_per_tick:]
-        for issue in batch:
-            kernel.inject("world.issue", issue, trust=Trust.WORLD, sender="issue-feed", ttl=5)
+        for item in batch:
+            if isinstance(item, dict) and item.get("topic") == "world.reagent" and isinstance(item.get("payload"), dict):
+                kernel.inject(
+                    "world.reagent",
+                    item["payload"],
+                    trust=Trust.WORLD,
+                    sender="reagent-feed",
+                    ttl=int(item.get("ttl", 5)),
+                    risk=float(item.get("risk", 0.0)),
+                )
+            elif isinstance(item, dict) and item.get("topic") == "peer.signal" and isinstance(item.get("envelope"), dict):
+                env = item["envelope"]
+                ok, _ = Skin.verify(env, self.peer_secrets)
+                kernel.inject(
+                    "peer.signal",
+                    env.get("payload"),
+                    trust=Trust.USER if ok else Trust.WORLD,
+                    sender=str(env.get("from", "peer")) if ok else "peer-unverified",
+                    ttl=5,
+                    risk=float(item.get("risk", 0.1 if ok else 0.6)),
+                )
+            else:
+                kernel.inject("world.issue", item, trust=Trust.WORLD, sender="issue-feed", ttl=5)
         for command in self.commands[self.state["command_cursor"]:]:
             kernel.inject("owner.command", command, trust=Trust.OWNER, sender="owner", ttl=5)
             self.state["command_cursor"] += 1
