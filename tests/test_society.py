@@ -3,6 +3,7 @@
 from bigbang.apps.caretaker import Host
 from bigbang.body import Genome, body_report, build_body
 from bigbang.cell import Cell
+from bigbang.runtime import Runner
 from bigbang.signal import Trust
 from bigbang.society import ReputationLedger, Skin, TerritoryTable, WorldSociety, should_backpressure
 
@@ -93,3 +94,25 @@ def test_host_routes_reagent_and_signed_peer_envelope():
 
     assert l.data["issues"]["77"]["labels"] == ["feature"]
     assert l.data["issues"]["88"]["labels"] == ["bug"]
+
+
+def test_runner_loads_peer_secrets_from_file_without_persisting_keys(tmp_path):
+    secrets_file = tmp_path / "peer_secrets.json"
+    secrets_file.write_text('{"body-alpha": "ephemeral-test-key"}', encoding="utf-8")
+    issues_dir = tmp_path / "issues"
+    issues_dir.mkdir()
+
+    env_ok = Skin("body-alpha", "ephemeral-test-key").seal({"id": 301, "title": "[bug] verified peer", "body": ""}, seq=1)
+    env_bad = Skin("body-alpha", "wrong-key").seal({"id": 302, "title": "[bug] forged peer", "body": ""}, seq=2)
+    (issues_dir / "01_ok.json").write_text('{"topic": "peer.signal", "envelope": ' + __import__("json").dumps(env_ok) + "}")
+    (issues_dir / "02_bad.json").write_text('{"topic": "peer.signal", "envelope": ' + __import__("json").dumps(env_bad) + "}")
+
+    state = tmp_path / "state"
+    runner = Runner(state, config={"organism": "body", "role": "beta"}, issues_dir=issues_dir, peer_secrets_file=secrets_file)
+    rep = runner.run(8)
+    assert rep["society"]["peer_accepted"] == 1
+    assert rep["society"]["peer_rejected"] >= 1
+    assert "301" in runner.ledger.data["issues"]
+    assert "302" not in runner.ledger.data["issues"]
+    assert "ephemeral-test-key" not in (state / "config.json").read_text()
+    assert "ephemeral-test-key" not in (state / "snapshot.json").read_text()

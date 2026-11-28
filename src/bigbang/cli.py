@@ -33,7 +33,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.no_reflex:
         config["reflex"] = False
     runner = Runner(
-        args.state, config=config, issues_dir=args.issues, commands_file=args.commands, resume=args.resume
+        args.state, config=config, issues_dir=args.issues, commands_file=args.commands,
+        resume=args.resume, peer_secrets_file=args.peer_secrets,
     )
     ticks = None if args.forever else args.ticks
     _print(runner.run(ticks, interval=args.interval))
@@ -154,6 +155,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--forever", action="store_true", help="run until a HALT file appears")
     run.add_argument("--interval", type=float, default=0.0, help="seconds to sleep between ticks")
     run.add_argument("--resume", action="store_true", help="continue an existing organism")
+    run.add_argument("--peer-secrets", help="optional JSON file of peer Skin secrets for signed peer.signal")
     run.set_defaults(func=cmd_run)
 
     st = sub.add_parser("status", help="show an organism's state")
