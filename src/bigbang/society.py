@@ -7,7 +7,6 @@ import hmac
 import json
 from typing import Any
 
-from .body import body_report
 from .signal import Trust
 
 
@@ -199,6 +198,8 @@ class WorldSociety:
         return self.flush_link(source, target)
 
     def flush_link(self, source: str, target: str) -> dict[str, Any]:
+        from .body import body_report
+
         link = (source, target)
         t_info = self.bodies[target]
         t_rep = body_report(t_info["kernel"], t_info["ledger"], t_info["genome"], t_info["organs"])
