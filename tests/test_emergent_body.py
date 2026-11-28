@@ -111,11 +111,15 @@ def test_body_sleep_rem_bloodstream_and_wake():
     base_mem_regen = organs["memory"].base_regens["memory.consolidator"]
     base_delib_regen = organs["deliberation"].base_regens["deliberation.cortex"]
 
-    # 12 calm idle ticks -> enters SLEEP_REM; Bloodstream boosts memory regen 2.0x and throttles deliberation 0.25x
+    # 12 calm idle ticks -> enters SLEEP_REM; Bloodstream boosts memory regen 2.0x and holds deliberation at 0.5x (equilibrium)
     kernel.run(12)
     assert kernel.operating_mode == "SLEEP_REM"
     assert kernel.budgets["memory.consolidator"].regen == round(base_mem_regen * 2.0, 3)
-    assert kernel.budgets["deliberation.cortex"].regen == round(max(0.1, base_delib_regen * 0.25), 3)
+    assert kernel.budgets["deliberation.cortex"].regen == round(max(0.1, base_delib_regen * 0.5), 3)
+
+    # Long REM sleep stays in equilibrium with zero dormant/wake thrashing
+    kernel.run(600)
+    assert kernel.stats["events"].get("dormant", 0) == 0
 
     # Inject external issue -> immediately wakes out of SLEEP_REM to ALERT
     kernel.inject("world.issue", {"id": 1, "title": "[bug] wake up", "body": "close 9"}, trust=Trust.WORLD)

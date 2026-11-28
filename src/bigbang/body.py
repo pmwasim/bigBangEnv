@@ -437,7 +437,7 @@ class Bloodstream(Cell):
             "ALERT": {"perception": 1.0, "action": 1.0, "memory": 1.0, "defense": 1.0, "deliberation": 1.0},
             "DEEP_FOCUS": {"perception": 1.25, "action": 1.25, "memory": 0.5, "defense": 1.0, "deliberation": 1.5},
             "LOCKDOWN": {"perception": 0.75, "action": 0.5, "memory": 0.5, "defense": 1.75, "deliberation": 0.5},
-            "SLEEP_REM": {"perception": 0.5, "action": 0.5, "memory": 2.0, "defense": 1.0, "deliberation": 0.25},
+            "SLEEP_REM": {"perception": 0.5, "action": 0.5, "memory": 2.0, "defense": 1.0, "deliberation": 0.5},
             "DORMANT": {"perception": 0.5, "action": 0.25, "memory": 0.5, "defense": 1.0, "deliberation": 0.25},
         }.get(mode, {})
         for name, factor in weights.items():
