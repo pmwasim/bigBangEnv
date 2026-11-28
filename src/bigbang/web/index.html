@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Living Cosmos — bigBangEnv Sanctuary</title>
+  <link
+    rel="icon"
+    type="image/svg+xml"
+    href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3CradialGradient id='g' cx='40%25' cy='35%25'%3E%3Cstop offset='0%25' stop-color='%23ffdfa3'/%3E%3Cstop offset='50%25' stop-color='%234fe3c1'/%3E%3Cstop offset='100%25' stop-color='%23050814'/%3E%3C/radialGradient%3E%3Ccircle cx='32' cy='32' r='28' fill='url(%23g)'/%3E%3C/svg%3E"
+  />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- Animated atmospheric nebula backdrop -->
+  <div class="cosmos-nebula" aria-hidden="true">
+    <div class="nebula-cloud nebula-a"></div>
+    <div class="nebula-cloud nebula-b"></div>
+    <div class="nebula-cloud nebula-c"></div>
+  </div>
+
+  <!-- Full-viewport 60fps living biosphere canvas -->
+  <canvas id="biosphere-canvas" aria-label="Living Biosphere Sanctuary"></canvas>
+
+  <!-- Floating hover tooltip for organisms on canvas -->
+  <div id="canvas-tooltip" class="canvas-tooltip hidden" role="status" aria-live="polite"></div>
+
+  <!-- Sanctuary UI Layer -->
+  <div class="sanctuary-hud">
+    <!-- Top Bar -->
+    <header class="top-bar">
+      <div class="brand-cluster glass-pill">
+        <span id="pulse-beacon" class="pulse-beacon" aria-hidden="true"></span>
+        <div class="brand-copy">
+          <h1 class="brand-title">The Living Cosmos</h1>
+          <p id="world-breath" class="brand-subtitle">Awakening the sanctuary…</p>
+        </div>
+      </div>
+
+      <div class="top-actions">
+        <!-- Prominent Voice & Sound Pill -->
+        <div class="voice-wrapper">
+          <button
+            id="voice-sound-btn"
+            class="glass-pill action-pill voice-pill"
+            type="button"
+            aria-expanded="false"
+            aria-controls="voice-popover"
+          >
+            <span class="voice-wave-icon" aria-hidden="true">
+              <i></i><i></i><i></i>
+            </span>
+            <span id="voice-pill-label">Voice &amp; Sound</span>
+          </button>
+
+          <div id="voice-popover" class="glass-card voice-popover hidden" role="dialog" aria-label="Voice and Ambient Sound">
+            <div class="popover-head">
+              <span class="popover-title">Sanctuary Voice &amp; Chimes</span>
+              <button id="voice-close-btn" class="icon-close" type="button" aria-label="Close voice controls">&times;</button>
+            </div>
+            <p class="popover-note">Let the cosmos speak new moments aloud and chime softly when sparks ripple across habitats.</p>
+
+            <div class="voice-toggles">
+              <button id="toggle-speech-btn" class="soft-toggle" type="button" aria-pressed="false">
+                <span class="toggle-dot"></span>
+                <span id="toggle-speech-text">Spoken Story: Quiet</span>
+              </button>
+              <button id="toggle-chimes-btn" class="soft-toggle" type="button" aria-pressed="false">
+                <span class="toggle-dot"></span>
+                <span id="toggle-chimes-text">Harmonic Chimes: Quiet</span>
+              </button>
+            </div>
+
+            <div class="voice-actions-row">
+              <button id="speak-now-btn" class="glow-btn" type="button">Speak Now</button>
+              <button id="mute-all-btn" class="ghost-btn" type="button">Silence All</button>
+            </div>
+
+            <label class="voice-picker-label" for="voice-select">Narrator Voice</label>
+            <select id="voice-select" class="voice-select">
+              <option value="">Natural Default Voice</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Tapestry & History Trigger -->
+        <button id="open-tapestry-btn" class="glass-pill action-pill tapestry-pill" type="button">
+          <span class="pill-orb amber-orb" aria-hidden="true"></span>
+          <span>Tapestry &amp; History</span>
+        </button>
+
+        <!-- Host Sanctuary Vitality Compact Orb -->
+        <button
+          id="vitality-pill-btn"
+          class="glass-card vitality-pill"
+          type="button"
+          aria-expanded="false"
+          aria-controls="vitality-popover"
+        >
+          <svg class="vitality-ring-svg" viewBox="0 0 64 64" aria-hidden="true">
+            <circle class="ring-track" cx="32" cy="32" r="26" />
+            <circle id="ring-mem" class="ring-arc ring-mem" cx="32" cy="32" r="26" />
+            <circle class="ring-track inner" cx="32" cy="32" r="19" />
+            <circle id="ring-cpu" class="ring-arc ring-cpu" cx="32" cy="32" r="19" />
+          </svg>
+          <div class="vitality-compact-copy">
+            <span class="vitality-label">Sanctuary Host</span>
+            <span id="vitality-phrase" class="vitality-phrase">Listening for pulse…</span>
+          </div>
+        </button>
+      </div>
+    </header>
+
+    <!-- Host Sanctuary Vitality Expanded Card -->
+    <aside id="vitality-popover" class="glass-card vitality-popover hidden" aria-label="Host Sanctuary Vitality">
+      <div class="popover-head">
+        <div>
+          <span class="eyebrow-soft">Living Substrate</span>
+          <h2 id="host-name-heading" class="card-heading">Sanctuary Vessel</h2>
+        </div>
+        <button id="vitality-close-btn" class="icon-close" type="button" aria-label="Close sanctuary vitality">&times;</button>
+      </div>
+      <p id="host-vitality-story" class="story-paragraph">Measuring the warmth and steadiness of the vessel beneath the biosphere.</p>
+      <div class="bio-rings-grid">
+        <div class="bio-ring-item">
+          <svg class="mini-ring" viewBox="0 0 80 80" aria-hidden="true">
+            <circle class="ring-track" cx="40" cy="40" r="32" />
+            <circle id="detail-ring-cpu" class="ring-arc ring-cpu" cx="40" cy="40" r="32" />
+          </svg>
+          <span class="bio-metric-value" id="metric-cpu">—</span>
+          <span class="bio-metric-name">CPU Breath</span>
+        </div>
+        <div class="bio-ring-item">
+          <svg class="mini-ring" viewBox="0 0 80 80" aria-hidden="true">
+            <circle class="ring-track" cx="40" cy="40" r="32" />
+            <circle id="detail-ring-mem" class="ring-arc ring-mem" cx="40" cy="40" r="32" />
+          </svg>
+          <span class="bio-metric-value" id="metric-mem">—</span>
+          <span class="bio-metric-name">Memory Warmth</span>
+        </div>
+        <div class="bio-ring-item">
+          <svg class="mini-ring" viewBox="0 0 80 80" aria-hidden="true">
+            <circle class="ring-track" cx="40" cy="40" r="32" />
+            <circle id="detail-ring-disk" class="ring-arc ring-disk" cx="40" cy="40" r="32" />
+          </svg>
+          <span class="bio-metric-value" id="metric-disk">—</span>
+          <span class="bio-metric-name">Storage Horizon</span>
+        </div>
+      </div>
+      <div class="host-uptime-whisper">
+        <span class="pill-orb emerald-orb" aria-hidden="true"></span>
+        <span id="metric-uptime">Continuous wakefulness</span>
+      </div>
+    </aside>
+
+    <!-- Being Quick Constellation Strip (floating left) -->
+    <nav id="beings-strip" class="beings-strip" aria-label="Living Beings in the Sanctuary"></nav>
+
+    <!-- Bottom Floating Live Whisper + Send a Spark -->
+    <section class="whisper-dock" aria-label="What is happening now">
+      <div class="glass-card whisper-card">
+        <div class="whisper-header">
+          <span class="eyebrow-soft">What Is Happening Now</span>
+          <span id="whisper-voice-state" class="whisper-voice-state">Quietly listening</span>
+        </div>
+        <h2 id="narrative-headline" class="narrative-headline">The biosphere breathes in stillness.</h2>
+        <p id="narrative-story" class="narrative-story">Waiting for the living habitats and organisms to share their current story.</p>
+
+        <form id="spark-form" class="spark-form" autocomplete="off">
+          <label class="sr-only" for="spark-zone">Choose a habitat</label>
+          <select id="spark-zone" class="spark-zone-select" aria-label="Habitat for your spark">
+            <option value="hub">The Central Hearth</option>
+            <option value="alpha-sector">Alpha Sanctuary</option>
+            <option value="beta-sector">Beta Frontier</option>
+            <option value="frontier">Far Horizon</option>
+          </select>
+          <label class="sr-only" for="spark-kind">Tone of your spark</label>
+          <select id="spark-kind" class="spark-kind-select" aria-label="Tone of your spark">
+            <option value="curiosity">Gentle Curiosity</option>
+            <option value="incident">Quiet Concern</option>
+          </select>
+          <label class="sr-only" for="spark-input">Whisper a thought or curiosity</label>
+          <input
+            id="spark-input"
+            class="spark-input"
+            type="text"
+            maxlength="240"
+            placeholder="Whisper a thought into a habitat…"
+          />
+          <button id="spark-submit-btn" class="spark-submit-btn" type="submit">Send a Spark</button>
+        </form>
+        <p id="spark-feedback" class="spark-feedback" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <!-- Being Soul & Relative World Drawer (Right Side) -->
+    <aside
+      id="being-drawer"
+      class="glass-card being-drawer hidden"
+      aria-label="Being Soul and Inner World"
+    >
+      <div class="drawer-header">
+        <div class="drawer-identity">
+          <span id="drawer-mood-aura" class="drawer-mood-aura" aria-hidden="true"></span>
+          <div>
+            <span id="drawer-zone-role" class="eyebrow-soft">Sanctuary Being</span>
+            <h2 id="drawer-being-name" class="drawer-title">Being</h2>
+            <p id="drawer-mood-phrase" class="drawer-mood-phrase">Dreaming quietly</p>
+          </div>
+        </div>
+        <button id="drawer-close-btn" class="icon-close" type="button" aria-label="Close being drawer">&times;</button>
+      </div>
+
+      <div class="drawer-actions">
+        <button id="hear-being-btn" class="glow-btn small-glow" type="button">Hear My Voice</button>
+        <span id="drawer-karma-pill" class="karma-pill">Karma Radiance</span>
+      </div>
+
+      <div class="drawer-scroll">
+        <!-- First-person Soul reflection -->
+        <section class="drawer-section soul-section">
+          <h3 class="section-label">Soul &amp; Calling</h3>
+          <blockquote id="drawer-soul-calling" class="soul-quote">"My calling is to keep watch with gentle clarity."</blockquote>
+          <div id="drawer-conscience" class="conscience-seals"></div>
+        </section>
+
+        <!-- Character Constellation SVG -->
+        <section class="drawer-section">
+          <h3 class="section-label">Character Constellation</h3>
+          <div class="constellation-wrap">
+            <svg id="character-constellation" class="constellation-svg" viewBox="0 0 260 220" role="img" aria-label="Character constellation"></svg>
+            <div id="character-traits-legend" class="traits-legend"></div>
+          </div>
+        </section>
+
+        <!-- Five Vital Organs -->
+        <section class="drawer-section">
+          <h3 class="section-label">Five Inner Organs</h3>
+          <p id="drawer-vitality-whisper" class="horizon-whisper"></p>
+          <div id="drawer-organs" class="organs-garden"></div>
+        </section>
+
+        <!-- Subjective Beliefs & Relative World -->
+        <section class="drawer-section">
+          <h3 class="section-label">What It Believes &amp; Sees Right Now</h3>
+          <p id="drawer-world-horizon" class="horizon-whisper"></p>
+          <div id="drawer-beliefs" class="beliefs-stream"></div>
+          <div id="drawer-observables" class="observables-stream"></div>
+        </section>
+      </div>
+    </aside>
+
+    <!-- Tapestry of Creation & History Modal -->
+    <div id="tapestry-backdrop" class="tapestry-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="tapestry-heading">
+      <div class="glass-card tapestry-modal">
+        <div class="tapestry-header">
+          <div>
+            <span class="eyebrow-soft">The Living Chronicle</span>
+            <h2 id="tapestry-heading" class="tapestry-title">Tapestry of Creation &amp; History</h2>
+          </div>
+          <button id="close-tapestry-btn" class="icon-close" type="button" aria-label="Close tapestry">&times;</button>
+        </div>
+
+        <div class="tapestry-tabs" role="tablist">
+          <button id="tab-chapters" class="tapestry-tab active" type="button" role="tab" aria-selected="true">What We Have &amp; Built</button>
+          <button id="tab-events" class="tapestry-tab" type="button" role="tab" aria-selected="false">Live Story Moments</button>
+        </div>
+
+        <div id="panel-chapters" class="tapestry-body" role="tabpanel">
+          <p class="tapestry-intro">From the first spark of physics to organisms with memory, society, and inner worlds — every milestone woven into this living cosmos.</p>
+          <div id="chapters-timeline" class="chapters-timeline"></div>
+        </div>
+
+        <div id="panel-events" class="tapestry-body hidden" role="tabpanel">
+          <p class="tapestry-intro">Recent ripples, dreams, and quiet acts across all habitats, told as they unfold.</p>
+          <div id="events-chronicle" class="events-chronicle"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
