@@ -334,10 +334,11 @@ def cmd_probe(args: argparse.Namespace) -> int:
 
 
 def cmd_world_status(args: argparse.Namespace) -> int:
-    out = run_cmd(["/opt/bigbang/venv/bin/python", "-m", "bigbang", "world", "status", "--url", args.url], check=False)
-    if not out:
-        out = run_cmd(["incus", "exec", "bb-alpha-sentinel", "--", "/opt/bigbang/venv/bin/python", "-m", "bigbang", "world", "status", "--url", args.url])
-    print(out)
+    import urllib.request
+
+    with urllib.request.urlopen(f"{args.url.rstrip('/')}/world", timeout=3.0) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    print(json.dumps(data, indent=2, default=str))
     return 0
 
 
