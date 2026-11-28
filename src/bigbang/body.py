@@ -278,6 +278,7 @@ class MemoryConsolidator(Cell):
             for mol in store.items():
                 if mol.hits >= 2 and mol.ttl is not None:
                     store.consolidate(mol.key)
+                    ctx.condense(0.5)
                     self.memory["consolidations"] += 1
         if pruned:
             self.memory["consolidations"] += pruned
@@ -361,6 +362,7 @@ class MyelinCompiler(Cell):
                                     {"sig_id": sh_sid_int, "label": lbl, "shadow": False},
                                     PROMOTE_SCHEMA,
                                 )
+                                ctx.condense(1.5)
                                 self.memory["promoted"].append(sh_sid)
                         else:
                             sh["disagree"] += 1
@@ -580,6 +582,7 @@ def body_report(kernel: Kernel, ledger: Ledger, genome: Genome, organs: dict[str
         "motor": {k: motor.get(k, 0) for k in ("executed", "vetoed", "failed", "expired")},
         "defense": {k: guardian[k] for k in ("mode", "vetoes", "lockdowns")},
         "organs": {name: organ.summary(kernel) for name, organ in organs.items()},
+        "physics": kernel.physics_summary(),
         "work_energy": round(work_energy, 3),
         "dormant": sorted(kernel.dormant),
         "quarantined": sorted(kernel.quarantined),

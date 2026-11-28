@@ -171,6 +171,8 @@ def status(state_dir: str | Path) -> dict[str, Any]:
         result["operating_mode"] = snap["operating_mode"]
     if "hormones" in snap:
         result["hormones"] = snap["hormones"]
+    if "physics" in snap:
+        result["physics"] = snap["physics"]
     return result
 
 

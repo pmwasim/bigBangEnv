@@ -52,6 +52,8 @@
 | Organ compartment isolation (`_organ.<name>.*`) | `_emit`, `_can_deliver_to_cell` | `denied`, `blocked` | `test_organ_compartment_isolation` |
 | Paracrine gradients decay and modulate hormones | `_emit_gradient`, `_update_hormones` | `mode` | `test_paracrine_gradient_and_hormonal_lockdown` |
 | Refractory cooldown limits cell re-triggering | `step` | — | `test_cell_refractory_cooldown` |
+| Conserved risk charge & topic max-risk gate | `inject`, `_emit`, `Context` | `blocked` | `test_risk_charge_conservation_and_max_risk_gate` |
+| Energy tensor: kinetic, thermal entropy, bound mass ($E=mc^2$) | `Budget`, `_condense` | — | `test_energy_tensor_entropy_and_condensation` |
 | TTL decay | `step` | `expire` | `test_signals_expire_after_ttl` |
 | External kill switch | `halt` | `halt` | `test_kill_switch_stops_the_kernel` |
 | `KERNEL` trust never held by cells or input | `Cell`, `inject` | `ValueError` | `test_cells_cannot_hold_kernel_trust` |

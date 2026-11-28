@@ -69,6 +69,9 @@ class Budget:
     capacity: float
     spent: float = 0.0
     regen: float = 0.0  # energy restored at the start of every tick
+    kinetic: float = 0.0
+    entropy: float = 0.0
+    bound_mass: float = 0.0
 
     @property
     def remaining(self) -> float:
@@ -78,11 +81,24 @@ class Budget:
         if amount < 0 or amount > self.remaining:
             return False
         self.spent += amount
+        self.kinetic = round(self.kinetic + amount, 4)
         return True
 
     def regenerate(self) -> None:
         if self.regen:
             self.spent = max(0.0, self.spent - self.regen)
+
+    def add_entropy(self, units: float) -> None:
+        self.entropy = round(self.entropy + max(0.0, units), 4)
+
+    def cool(self, factor: float = 0.85) -> None:
+        if self.entropy > 0.0:
+            self.entropy = round(self.entropy * factor, 4)
+            if self.entropy < 0.01:
+                self.entropy = 0.0
+
+    def condense(self, mass_gain: float) -> None:
+        self.bound_mass = round(self.bound_mass + max(0.0, mass_gain), 4)
 
 
 class Kernel:
@@ -114,6 +130,7 @@ class Kernel:
         self.dormant: set[str] = set()
         self.quarantined: set[str] = set()
         self.topic_floor: dict[str, Trust] = {}
+        self.topic_max_risk: dict[str, float] = {}
         self.taint: dict[str, Trust] = {}  # residue: lowest trust each cell has consumed
         # A veto is final: once live, the kernel remembers it after the signal expires,
         # so a cell that slept through it still sees it (signal id -> veto topic).
@@ -152,6 +169,11 @@ class Kernel:
         self.topic_floor[topic] = trust
         self._log("law", topic=topic, min_trust=trust.name)
 
+    def require_max_risk(self, topic: str, max_risk: float) -> None:
+        """Law: excite signals on ``topic`` cannot exceed ``max_risk`` charge."""
+        self.topic_max_risk[topic] = float(max_risk)
+        self._log("law", topic=topic, max_risk=float(max_risk))
+
     def guard(self, topic: str, cell_name: str) -> None:
         """Law: excite signals on ``topic`` hold whenever ``cell_name`` is offline."""
         if cell_name not in self.cells:
@@ -181,6 +203,8 @@ class Kernel:
         trust: Trust = Trust.WORLD,
         sender: str = "world",
         ttl: int = 3,
+        risk: float = 0.0,
+        affinity: str = "*",
     ) -> Signal | None:
         """Entry point for input from outside the kernel. Delivered next tick.
 
@@ -196,7 +220,11 @@ class Kernel:
         if floor is not None and trust < floor:
             self._log("blocked", sender=sender, topic=topic, trust=trust.name, needs=floor.name)
             return None
-        signal = self._make(topic, payload, Kind.EXCITE, sender, trust, ttl)
+        max_risk = self.topic_max_risk.get(topic)
+        if max_risk is not None and risk > max_risk:
+            self._log("blocked", sender=sender, topic=topic, risk=risk, max_risk=max_risk)
+            return None
+        signal = self._make(topic, payload, Kind.EXCITE, sender, trust, ttl, risk=risk, affinity=affinity)
         self.queue.append(signal)
         self._tick_activity = True
         self._log("inject", **signal.to_dict())
@@ -221,8 +249,10 @@ class Kernel:
             raise KernelHalted("kernel was halted")
         self.tick += 1
 
+        cool_factor = 0.65 if self.operating_mode == "SLEEP_REM" else 0.85
         for name, budget in self.budgets.items():
             budget.regenerate()
+            budget.cool(cool_factor)
             cell = self.cells[name]
             if name in self.dormant and budget.remaining >= cell.step_cost:
                 self.dormant.discard(name)
@@ -383,7 +413,8 @@ class Kernel:
             for gname, val in bucket.items()
             if gname in ("friction", "stress", "error")
         )
-        raw_stress = min(1.0, self._tick_stress * 0.25 + friction * 0.2)
+        total_entropy = sum(b.entropy for b in self.budgets.values())
+        raw_stress = min(1.0, self._tick_stress * 0.25 + friction * 0.2 + total_entropy * 0.05)
         stress = round(max(0.0, min(1.0, 0.85 * self.hormones["stress"] + 0.15 * raw_stress)), 4)
 
         raw_urgency = min(1.0, len(self.queue) / 20.0)
@@ -414,7 +445,16 @@ class Kernel:
             self._log("mode", from_mode=prev, to_mode=mode, fuel=fuel, stress=stress, urgency=urgency, idle=idle)
 
     def _emit(
-        self, cell: Cell, topic: str, payload: Any, kind: Kind, ttl: int, trust: Trust
+        self,
+        cell: Cell,
+        topic: str,
+        payload: Any,
+        kind: Kind,
+        ttl: int,
+        trust: Trust,
+        *,
+        risk: float = 0.0,
+        affinity: str = "*",
     ) -> Signal | None:
         if topic.startswith("_organ.") and (cell.organ is None or not topic.startswith(f"_organ.{cell.organ}.")):
             self._log("denied", cell=cell.name, topic=topic, why="organ compartment")
@@ -426,10 +466,14 @@ class Kernel:
         if kind is Kind.EXCITE and floor is not None and trust < floor:
             self._log("blocked", cell=cell.name, topic=topic, trust=trust.name, needs=floor.name)
             return None
+        max_risk = self.topic_max_risk.get(topic)
+        if kind is Kind.EXCITE and max_risk is not None and risk > max_risk:
+            self._log("blocked", cell=cell.name, topic=topic, risk=risk, max_risk=max_risk)
+            return None
         if not self.budgets[cell.name].try_charge(self.EMIT_COST):
             self._log("denied", cell=cell.name, topic=topic, why="no fuel")
             return None
-        signal = self._make(topic, payload, kind, cell.name, trust, ttl)
+        signal = self._make(topic, payload, kind, cell.name, trust, ttl, risk=risk, affinity=affinity)
         self._outbox.append(signal)
         if not topic.startswith("_organ."):
             self._tick_activity = True
@@ -437,7 +481,16 @@ class Kernel:
         return signal
 
     def _declassify(
-        self, cell: Cell, topic: str, payload: Any, schema: dict[str, Any], ttl: int, tainted: Trust
+        self,
+        cell: Cell,
+        topic: str,
+        payload: Any,
+        schema: dict[str, Any],
+        ttl: int,
+        tainted: Trust,
+        *,
+        risk: float = 0.0,
+        affinity: str = "*",
     ) -> Signal | None:
         if not cell.declassify:
             self._log("denied", cell=cell.name, topic=topic, why="no declassify grant")
@@ -448,7 +501,10 @@ class Kernel:
             return None
         self._log("declassify", cell=cell.name, topic=topic, from_trust=tainted.name,
                   to_trust=cell.trust.name, payload=payload)
-        return self._emit(cell, topic, payload, Kind.EXCITE, ttl, cell.trust)
+        return self._emit(cell, topic, payload, Kind.EXCITE, ttl, cell.trust, risk=risk, affinity=affinity)
+
+    def _condense(self, cell: Cell, mass_gain: float) -> None:
+        self.budgets[cell.name].condense(mass_gain)
 
     def _spend(self, cell: Cell, units: float, reason: str) -> bool:
         ok = self.budgets[cell.name].try_charge(units)
@@ -456,11 +512,38 @@ class Kernel:
         return ok
 
     def _make(
-        self, topic: str, payload: Any, kind: Kind, sender: str, trust: Trust, ttl: int
+        self,
+        topic: str,
+        payload: Any,
+        kind: Kind,
+        sender: str,
+        trust: Trust,
+        ttl: int,
+        *,
+        risk: float = 0.0,
+        affinity: str = "*",
     ) -> Signal:
-        signal = Signal(self._next_id, topic, payload, kind, sender, trust, self.tick, ttl)
+        signal = Signal(self._next_id, topic, payload, kind, sender, trust, self.tick, ttl, risk=risk, affinity=affinity)
         self._next_id += 1
         return signal
+
+    def physics_summary(self) -> dict[str, float]:
+        """Aggregate cosmological state across all cells in this kernel."""
+        from .physics import gravitational_mass, time_dilation
+
+        potential = round(sum(b.remaining for b in self.budgets.values()), 2)
+        kinetic = round(sum(b.kinetic for b in self.budgets.values()), 2)
+        entropy = round(sum(b.entropy for b in self.budgets.values()), 4)
+        bound_mass = round(sum(b.bound_mass for b in self.budgets.values()), 4)
+        mass = gravitational_mass(len(self.queue), entropy, bound_mass)
+        return {
+            "potential": potential,
+            "kinetic": kinetic,
+            "entropy": entropy,
+            "bound_mass": bound_mass,
+            "gravitational_mass": mass,
+            "time_dilation": time_dilation(mass),
+        }
 
     # ------------------------------------------------ matter & history
     def _log(self, event: str, **data: Any) -> None:
@@ -473,6 +556,9 @@ class Kernel:
             self.stats["work_energy"] = round(self.stats["work_energy"] + float(data["units"]), 6)
         elif event in ("blocked", "denied", "quarantine", "cancel", "hold"):
             self._tick_stress += 1.0
+            cell_name = data.get("cell")
+            if isinstance(cell_name, str) and cell_name in self.budgets:
+                self.budgets[cell_name].add_entropy(0.5)
 
     def drain_trace(self) -> list[dict[str, Any]]:
         """Flush and clear the in-memory trace buffer while preserving cumulative stats."""
@@ -493,6 +579,9 @@ class Kernel:
                     "dormant": name in self.dormant,
                     "quarantined": name in self.quarantined,
                     **({"taint": self.taint[name].name} if name in self.taint else {}),
+                    **({"kinetic": self.budgets[name].kinetic} if self.budgets[name].kinetic else {}),
+                    **({"entropy": self.budgets[name].entropy} if self.budgets[name].entropy else {}),
+                    **({"bound_mass": self.budgets[name].bound_mass} if self.budgets[name].bound_mass else {}),
                 }
                 for name, cell in self.cells.items()
             },
@@ -505,6 +594,7 @@ class Kernel:
             "hormones": dict(self.hormones),
             "operating_mode": self.operating_mode,
             "cooldowns": dict(self._cooldowns),
+            "physics": self.physics_summary(),
         }
 
     def restore(self, snap: dict[str, Any]) -> None:
@@ -532,6 +622,9 @@ class Kernel:
         for name, state in snap["cells"].items():
             self.cells[name].memory = json.loads(json.dumps(state["memory"]))
             self.budgets[name].spent = state["spent"]
+            self.budgets[name].kinetic = float(state.get("kinetic", 0.0))
+            self.budgets[name].entropy = float(state.get("entropy", 0.0))
+            self.budgets[name].bound_mass = float(state.get("bound_mass", 0.0))
             if "taint" in state:
                 self.taint[name] = Trust[state["taint"]]
             if state["dormant"]:

@@ -30,8 +30,8 @@ def cmd_list(args: argparse.Namespace) -> int:
         print("No active bigBangEnv organism environments found.")
         return 0
 
-    print(f"{'TIER':<12} {'BODY':<22} {'STATE':<9} {'IPV4':<15} {'TICKS':<7} {'MODE':<11} {'CELLS':<6} {'HALTED'}")
-    print("-" * 92)
+    print(f"{'TIER':<8} {'BODY':<14} {'STATE':<8} {'IPV4':<14} {'TICKS':<6} {'MODE':<10} {'MASS':<6} {'HEAT':<6} {'HALTED'}")
+    print("-" * 86)
 
     for c in bb_containers:
         name = c["name"]
@@ -49,7 +49,7 @@ def cmd_list(args: argparse.Namespace) -> int:
                             ipv4 = addr.get("address", "-")
                             break
 
-        ticks = mode = cells = halted = "-"
+        ticks = mode = mass = heat = halted = "-"
         if state == "Running":
             try:
                 res = run_cmd([
@@ -58,13 +58,15 @@ def cmd_list(args: argparse.Namespace) -> int:
                 ])
                 stat = json.loads(res)
                 ticks = str(stat.get("tick", 0))
-                mode = str(stat.get("operating_mode", "CARE"))
-                cells = str(len(stat.get("cells", {})))
+                mode = str(stat.get("operating_mode", "ALERT"))
+                phys = stat.get("physics", {})
+                mass = str(round(phys.get("gravitational_mass", 1.0), 2))
+                heat = str(round(phys.get("entropy", 0.0), 2))
                 halted = str(stat.get("halted", False))
             except Exception:
-                ticks = mode = cells = halted = "init"
+                ticks = mode = mass = heat = halted = "init"
 
-        print(f"{tier:<12} {role:<22} {state:<9} {ipv4:<15} {ticks:<7} {mode:<11} {cells:<6} {halted}")
+        print(f"{tier:<8} {role:<14} {state:<8} {ipv4:<14} {ticks:<6} {mode:<10} {mass:<6} {heat:<6} {halted}")
 
     return 0
 
@@ -208,6 +210,57 @@ def cmd_halt_tier(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_route(args: argparse.Namespace) -> int:
+    """Route an incoming impulse to a Body in the tier using EM affinity + Gravitational curvature."""
+    import math
+
+    tier = args.tier_name
+    containers = [
+        c for c in get_incus_containers()
+        if c["name"].startswith(f"bb-{tier}-") and c["status"] == "Running"
+    ]
+    if not containers:
+        print(f"No running Bodies in tier '{tier}'.", file=sys.stderr)
+        return 1
+
+    best_name, best_action = None, float("inf")
+    for idx, c in enumerate(sorted(containers, key=lambda x: x["name"]), start=1):
+        name = c["name"]
+        role = name.split("-", 2)[2]
+        if args.affinity != "*" and role != args.affinity:
+            continue  # EM repulsion
+        raw = run_cmd([
+            "incus", "exec", name, "--",
+            "/opt/bigbang/venv/bin/python", "-m", "bigbang", "status", "--state", "/var/lib/bigbang/state"
+        ], check=False)
+        stat = json.loads(raw) if raw else {}
+        phys = stat.get("physics", {})
+        mass = float(phys.get("gravitational_mass", 1.0))
+        heat = float(phys.get("entropy", 0.0))
+        pot = float(phys.get("potential", 100.0))
+        em = (pot / 100.0) / (float(idx) ** 2)
+        action = (mass * 0.5) + (args.risk * (1.0 + heat * 0.5)) - em
+        print(f"  candidate={name:<20} mass={mass:.2f} heat={heat:.2f} em={em:.3f} action={action:.3f}")
+        if action < best_action:
+            best_action = action
+            best_name = name
+
+    if best_name is None:
+        print(f"EM repulsion: no Body matched affinity '{args.affinity}'.", file=sys.stderr)
+        return 1
+
+    issue_id = int(time.time() * 1000) % 1_000_000_000
+    payload = {"id": issue_id, "title": args.title, "body": args.body}
+    encoded = json.dumps(payload).replace("'", "'\\''")
+    fname = f"routed_{issue_id}.json"
+    run_cmd([
+        "incus", "exec", best_name, "--", "bash", "-c",
+        f"echo '{encoded}' > /var/lib/bigbang/issues/{fname} && chown bigbang:bigbang /var/lib/bigbang/issues/{fname}"
+    ])
+    print(f"[✓] Least-action routing chose {best_name} (action={best_action:.3f}) -> injected {fname}")
+    return 0
+
+
 def cmd_trace(args: argparse.Namespace) -> int:
     c_name = args.container
     tail = args.tail
@@ -248,6 +301,13 @@ def main() -> int:
     trace.add_argument("container", help="Container name (e.g. bb-alpha-sentinel)")
     trace.add_argument("--tail", type=int, default=15, help="Number of records to show")
 
+    route = sub.add_parser("route", help="Route an impulse across a tier using EM + Gravitational curvature")
+    route.add_argument("tier_name", help="Target tier name (e.g. alpha)")
+    route.add_argument("--title", required=True)
+    route.add_argument("--body", default="")
+    route.add_argument("--affinity", default="*", help="Required Body role affinity (or * for any)")
+    route.add_argument("--risk", type=float, default=0.1, help="Signal risk charge [0.0..1.0]")
+
     args = parser.parse_args()
     if args.command == "list":
         return cmd_list(args)
@@ -261,6 +321,8 @@ def main() -> int:
         return cmd_halt_tier(args)
     elif args.command == "trace":
         return cmd_trace(args)
+    elif args.command == "route":
+        return cmd_route(args)
     return 0
 
 
