@@ -13,6 +13,125 @@ from pathlib import Path
 from typing import Any
 
 from .society import TerritoryTable
+from .soul import BeliefSystem, Character
+
+
+@dataclass(frozen=True)
+class RelativeWorld:
+    """Subjective local reference frame (Umwelt) of an entity at any emergent scale."""
+
+    observer_id: str
+    scale: str  # "molecule" | "cell" | "organ" | "body" | "society"
+    frame_origin: str
+    horizon: tuple[str, ...]
+    ambient: dict[str, Any]
+    observables: list[dict[str, Any]]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "observer_id": self.observer_id,
+            "scale": self.scale,
+            "frame_origin": self.frame_origin,
+            "horizon": list(self.horizon),
+            "ambient": dict(self.ambient),
+            "observables": list(self.observables),
+        }
+
+
+def molecule_world(chamber: Any, reaction: Any, *, product_concentration: int = 0) -> RelativeWorld:
+    """The Chemical relative world surrounding reacting molecules inside a ReactionChamber."""
+    available_reagents = {k: len(v) for k, v in sorted(chamber.reagents.items())}
+    catalysts = [c.name for c in chamber.catalysts.values() if c.reaction_name == reaction.name]
+    ea = chamber.effective_ea(reaction, product_concentration=product_concentration)
+    return RelativeWorld(
+        observer_id=reaction.name,
+        scale="molecule",
+        frame_origin="reaction_chamber",
+        horizon=tuple(sorted(reaction.reactants.keys())),
+        ambient={"effective_ea": ea, "catalysts": catalysts, "product_concentration": product_concentration},
+        observables=[{"reactant": k, "count": cnt, "required": reaction.reactants.get(k, 0)} for k, cnt in available_reagents.items()],
+    )
+
+
+def cell_world(kernel: Any, cell: Any) -> RelativeWorld:
+    """The Cellular relative world: compartment gradients, receptor-filtered signals, and budget."""
+    compartment = cell.organ or "body"
+    peers = tuple(
+        sorted(name for name, peer in kernel.cells.items() if name != cell.name and (peer.organ or "body") == compartment)
+    )
+    visible = [
+        {"id": s.id, "topic": s.topic, "trust": s.trust.name, "risk": s.risk}
+        for s in kernel.queue
+        if s.trust >= cell.accepts and (not s.topic.startswith("_organ.") or s.topic.startswith(f"_organ.{compartment}."))
+    ]
+    budget = kernel.budgets.get(cell.name)
+    return RelativeWorld(
+        observer_id=cell.name,
+        scale="cell",
+        frame_origin=compartment,
+        horizon=peers,
+        ambient={
+            "gradients": dict(kernel.gradients.get(compartment, {})),
+            "fuel": round(budget.remaining, 2) if budget else 0.0,
+            "cooldown": kernel._cooldowns.get(cell.name, 0),
+            "accepts": cell.accepts.name,
+        },
+        observables=visible,
+    )
+
+
+def organ_world(kernel: Any, organ: Any) -> RelativeWorld:
+    """The Organ relative world: internal tissue pool, typed ports, and whole-body hormones."""
+    summary = organ.summary(kernel)
+    return RelativeWorld(
+        observer_id=organ.name,
+        scale="organ",
+        frame_origin="body",
+        horizon=tuple(organ.in_ports) + tuple(organ.out_ports),
+        ambient={
+            "hormones": dict(kernel.hormones),
+            "operating_mode": kernel.operating_mode,
+            "fuel_remaining": summary["fuel_remaining"],
+            "gradients": summary["gradients"],
+        },
+        observables=[{"cell": c.name, "lineage": c.lineage} for c, _ in organ.cells],
+    )
+
+
+def body_world(
+    shared_world: SharedWorld,
+    body_id: str,
+    *,
+    character: Character | None = None,
+    beliefs: BeliefSystem | None = None,
+) -> RelativeWorld:
+    """Subjective Body Umwelt: local SharedWorld Zone filtered through Character & Beliefs."""
+    raw = shared_world.sense(body_id)
+    char = character or Character()
+    bs = beliefs or BeliefSystem()
+    obs = []
+    for obj in raw["objects"]:
+        prop = f"zone:{obj['zone']}:{obj['kind']}"
+        salience = bs.salience(prop, base_risk=float(obj.get("risk", 0.1)), caution=char.caution)
+        obs.append({
+            **obj,
+            "subjective_salience": salience,
+            "cautious_flag": salience >= char.max_salient_risk,
+        })
+    obs.sort(key=lambda item: (-item["subjective_salience"], item["issue_id"]))
+    return RelativeWorld(
+        observer_id=body_id,
+        scale="body",
+        frame_origin=raw["zone"]["name"],
+        horizon=tuple(p["body_id"] for p in raw["peers"]) + tuple(raw["zone"]["neighbors"]),
+        ambient={
+            "zone": raw["zone"],
+            "curiosity": char.curiosity,
+            "caution": char.caution,
+            "world_tick": raw["world_tick"],
+        },
+        observables=obs,
+    )
 
 
 @dataclass

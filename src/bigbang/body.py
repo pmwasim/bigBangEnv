@@ -15,6 +15,8 @@ from .lineages import Defense, Motor
 from .matter import MatterStore
 from .organ import Organ
 from .signal import Trust
+from .soul import BeliefSystem, Character, Soul
+from .world import cell_world, organ_world
 
 MAX_TITLE, MAX_BODY = 300, 20_000
 PROMOTE_SCHEMA = {"sig_id": int, "label": frozenset(LABELS), "shadow": bool}
@@ -114,6 +116,8 @@ class SensoryIngest(Cell):
                 "body": issue.get("body", "")[:MAX_BODY],
                 "source_topic": signal.topic,
             }
+            if signal.risk > 0.0:
+                clean["risk"] = round(float(signal.risk), 4)
             store.put(f"issue:{clean['id']}", clean["title"], trust=signal.trust, tick=ctx.tick, ttl=30)
             fresh.append(clean)
 
@@ -336,17 +340,29 @@ class CortexReasoner(Cell):
     lineage = "reasoning"
     subscriptions = ("issue.novel", "_organ.deliberation.queued")
 
-    def __init__(self, name: str = "deliberation.cortex", *, brain: Brain, reserve: float = 10.0, **kw: Any):
+    def __init__(
+        self,
+        name: str = "deliberation.cortex",
+        *,
+        brain: Brain,
+        reserve: float = 10.0,
+        character: Character | None = None,
+        **kw: Any,
+    ):
         kw.setdefault("emits", ["action.label"])
         kw.setdefault("declassify", True)
         super().__init__(name, **kw)
         self.brain = brain
         self.reserve = reserve
-        self.memory.update(thoughts=0, outages=0, deferred_low_fuel=0, energy=0.0, backlog=[], max_backlog=0)
+        self.character = character or Character()
+        self.memory.update(thoughts=0, outages=0, deferred_low_fuel=0, caution_holds=0, energy=0.0, backlog=[], max_backlog=0)
 
     def _decide(self, ctx: Context, issue: dict[str, Any], hint: str | None = None) -> str:
         if hint in LABELS:
             return hint
+        if float(issue.get("risk", 0.0)) >= self.character.max_salient_risk and ctx.trust < Trust.OPERATOR:
+            self.memory["caution_holds"] += 1
+            return "needs-human"
         if ctx.fuel < self.reserve or ctx.mode == "DORMANT":
             self.memory["deferred_low_fuel"] += 1
             return "needs-human"
@@ -621,24 +637,40 @@ class MyelinCompiler(Cell):
 
 # ===================================================================== Organ 4: Action (with Outcome Sensor)
 class OutcomeSensor(Cell):
-    """Sensory feedback loop inside ActionOrgan: emits friction gradients on failed actions."""
+    """Sensory feedback loop inside ActionOrgan: emits friction gradients & updates Beliefs/Soul karma."""
 
     lineage = "sensory"
     subscriptions = ("outcome.*",)
 
-    def __init__(self, name: str = "action.verifier", **kw: Any):
+    def __init__(self, name: str = "action.verifier", *, role: str = "general", **kw: Any):
         kw.setdefault("emits", [])
         super().__init__(name, **kw)
-        self.memory.update(verified=0, failures=0)
+        self.memory.update(
+            verified=0,
+            failures=0,
+            karma=0.0,
+            character=Character.for_role(role).to_dict(),
+            beliefs={},
+        )
 
     def step(self, ctx: Context) -> None:
+        beliefs = BeliefSystem.from_dict(self.memory.get("beliefs", {}))
+        karma = float(self.memory.get("karma", 0.0))
         for s in ctx.inbox:
+            verb = s.topic.split(".", 1)[1] if "." in s.topic else s.topic
             status = s.payload.get("status")
             if status == "done":
                 self.memory["verified"] += 1
-            elif status in ("failed", "expired"):
+                karma = round(karma + 0.1, 3)
+                beliefs.observe(f"action:{verb}", confirmed=True, tick=ctx.tick)
+            elif status in ("failed", "expired", "vetoed"):
                 self.memory["failures"] += 1
-                ctx.emit_gradient("friction", 0.5)
+                karma = round(max(-10.0, karma - 0.15), 3)
+                beliefs.observe(f"action:{verb}", confirmed=False, tick=ctx.tick)
+                if status in ("failed", "expired"):
+                    ctx.emit_gradient("friction", 0.5)
+        self.memory["karma"] = karma
+        self.memory["beliefs"] = beliefs.to_dict()
         total = self.memory["verified"] + self.memory["failures"]
         if total >= 3 and (self.memory["verified"] / total) < 0.7:
             ctx.emit_gradient("friction", 0.2)
@@ -682,6 +714,8 @@ def build_body(
     genome: Genome | None = None,
     ledger: Ledger | None = None,
     brain: Brain | None = None,
+    soul: Soul | None = None,
+    character: Character | None = None,
 ) -> tuple[Kernel, Ledger, Genome, dict[str, Organ]]:
     """Boot a unified 5-organ living Body coupled to an authoritative Kernel."""
     cfg = {
@@ -698,6 +732,8 @@ def build_body(
         **(config or {}),
     }
     genome = genome or Genome(identity=f"body-{cfg['role']}", role=cfg["role"])
+    soul = soul or Soul.create(genome.identity, calling=cfg["role"])
+    character = character or Character.for_role(cfg["role"])
     ledger = ledger or Ledger()
     brain = brain or (make_brain(cfg["brain"], **cfg["brain_options"]) if cfg["brain"] else RuleBrain())
 
@@ -733,7 +769,10 @@ def build_body(
         energy_pool=cfg["reasoner_fuel"] * 2.0,
         base_regen=cfg["reasoner_regen"] * 2.0,
     )
-    deliberation_organ.add_cell(CortexReasoner(brain=brain, reserve=cfg["reasoner_reserve"]), share=1.0)
+    deliberation_organ.add_cell(
+        CortexReasoner(brain=brain, reserve=cfg["reasoner_reserve"], character=character),
+        share=1.0,
+    )
     deliberation_organ.add_cell(DeliberationStem(), share=1.0)
 
     memory_organ = Organ(
@@ -762,7 +801,7 @@ def build_body(
     )
     action_organ.add_cell(Commander(), share=1.0)
     action_organ.add_cell(Motor("action.motor", ledger.effectors(), resume_per_tick=pace), share=1.0)
-    action_organ.add_cell(OutcomeSensor(), share=1.0)
+    action_organ.add_cell(OutcomeSensor(role=cfg["role"]), share=1.0)
 
     organs: dict[str, Organ] = {
         "perception": perception_organ,
@@ -787,6 +826,8 @@ def build_body(
 
     for organ in organs.values():
         organ.mount(kernel)
+    kernel.cells["action.verifier"].memory["soul"] = soul.to_dict()
+    kernel.cells["action.verifier"].memory["character"] = character.to_dict()
 
     return kernel, ledger, genome, organs
 
@@ -806,11 +847,23 @@ def body_report(kernel: Kernel, ledger: Ledger, genome: Genome, organs: dict[str
     consolidator = kernel.cells["memory.consolidator"].memory
     verifier = kernel.cells["action.verifier"].memory
     stem = kernel.cells["deliberation.stem"].memory
+    soul_data = verifier.get("soul") or Soul.create(genome.identity, calling=genome.role).to_dict()
+    char_data = verifier.get("character") or Character.for_role(genome.role).to_dict()
     v_total = max(1, verifier["verified"] + verifier["failures"])
     spine_total = reflex["hits"] + reflex["compiled_hits"]
     return {
         "identity": genome.identity,
         "role": genome.role,
+        "soul": {**soul_data, "karma": float(verifier.get("karma", 0.0))},
+        "character": char_data,
+        "beliefs": dict(verifier.get("beliefs", {})),
+        "relative_worlds": {
+            "organs": {name: organ_world(kernel, organ).to_dict() for name, organ in organs.items()},
+            "cells_sample": {
+                "perception.reflex": cell_world(kernel, kernel.cells["perception.reflex"]).ambient,
+                "deliberation.cortex": cell_world(kernel, kernel.cells["deliberation.cortex"]).ambient,
+            },
+        },
         "tick": kernel.tick,
         "halted": kernel.halted,
         "operating_mode": kernel.operating_mode,
@@ -822,7 +875,14 @@ def body_report(kernel: Kernel, ledger: Ledger, genome: Genome, organs: dict[str
         "reflex_hits": reflex["hits"],
         "compiled_reflex_hits": reflex["compiled_hits"],
         "compiled_rules": len(reflex["compiled"]),
-        "cortex": {k: cortex[k] for k in ("thoughts", "outages", "deferred_low_fuel", "energy", "max_backlog")},
+        "cortex": {
+            "thoughts": cortex["thoughts"],
+            "outages": cortex["outages"],
+            "deferred_low_fuel": cortex["deferred_low_fuel"],
+            "caution_holds": cortex.get("caution_holds", 0),
+            "energy": cortex["energy"],
+            "max_backlog": cortex["max_backlog"],
+        },
         "myelin": {"promoted": len(myelin["promoted"]), "demoted": len(myelin["demoted"])},
         "motor": {k: motor.get(k, 0) for k in ("executed", "vetoed", "failed", "expired")},
         "defense": {k: guardian[k] for k in ("mode", "vetoes", "lockdowns")},

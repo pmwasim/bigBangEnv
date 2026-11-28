@@ -73,3 +73,8 @@ M1's exit criteria are met (ADR-0008). Still deferred until there is an API budg
 
 - [x] Authoritative outer `SharedWorld` (`world.py`) with spatial `Zone` topology, strict Locality, shared `WorldEntity` objects, finite energy reserves, ambient entropy, and HTTP daemon (`bigbang world serve`)
 - [x] `Host` & `Ledger` bound directly to `SharedWorld` / `WorldClient` (`--world`, `--zone`) so distributed Bodies inhabit and mutate one causal environment
+
+## M8 — Nested Relative Worlds, Beliefs, Character & Soul *(ADR-0019)* — **done**
+
+- [x] Multi-scale `RelativeWorld` frames (`molecule_world`, `cell_world`, `organ_world`, `body_world`) giving every entity its own observer-dependent reality
+- [x] Organism ontological core (`soul.py`): immutable `Soul` (`soul_id`, `conscience`, `karma`), role-calibrated `Character` temperament, and outcome-updated `BeliefSystem` without weakening DIFC kernel laws

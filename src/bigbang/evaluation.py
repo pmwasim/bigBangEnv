@@ -639,11 +639,66 @@ def shared_world_locality_and_state() -> dict[str, Any]:
     }
 
 
+def relative_worlds_and_organism_soul() -> dict[str, Any]:
+    """Relative Worlds + Ontology: cells, organs, and Bodies perceive relative worlds; Soul/Character/Beliefs shape behavior."""
+    from .body import body_report, build_body
+    from .signal import Trust
+    from .soul import BeliefSystem, Character
+    from .world import SharedWorld, body_world, cell_world
+
+    # Distinct Characters viewing the exact same SharedWorld object perceive distinct subjective salience
+    w = SharedWorld()
+    w.enter("body-auditor", role="auditor", zone="alpha-sector")
+    w.enter("body-planner", role="planner", zone="alpha-sector")
+    w.spawn_entity("alpha-sector", kind="anomaly", title="Unclear telemetry fluctuation", body="check", risk=0.25)
+
+    aud_char = Character.for_role("auditor")
+    pln_char = Character.for_role("planner")
+    low_trust_belief = BeliefSystem()
+    low_trust_belief.observe("zone:alpha-sector:anomaly", confirmed=False, weight=0.6)
+
+    aud_world = body_world(w, "body-auditor", character=aud_char, beliefs=low_trust_belief)
+    pln_world = body_world(w, "body-planner", character=pln_char, beliefs=BeliefSystem())
+
+    # Organism ontological integration: Auditor vs Planner on hazardous novel input
+    ka, la, ga, oa = build_body({"role": "auditor"})
+    kp, lp, gp, op = build_body({"role": "planner"})
+    ka.inject("world.issue", {"id": 91, "title": "Ambiguous kernel change", "body": "crash"}, trust=Trust.WORLD, risk=0.45)
+    kp.inject("world.issue", {"id": 91, "title": "Ambiguous kernel change", "body": "crash"}, trust=Trust.WORLD, risk=0.45)
+    ka.run(6)
+    kp.run(6)
+
+    rep_a = body_report(ka, la, ga, oa)
+    rep_p = body_report(kp, lp, gp, op)
+    aud_cell_w = cell_world(ka, ka.cells["action.motor"])
+    perc_cell_w = cell_world(ka, ka.cells["perception.ingest"])
+
+    return {
+        "name": "relative_worlds_and_organism_soul",
+        "claim": "every scale inhabits its own relative world; Soul, Character & Beliefs differentiate Bodies within Kernel laws",
+        "passed": aud_world.observables[0]["cautious_flag"] is True
+        and pln_world.observables[0]["cautious_flag"] is False
+        and aud_cell_w.frame_origin != perc_cell_w.frame_origin
+        and la.data["issues"]["91"]["labels"] == ["needs-human"]
+        and lp.data["issues"]["91"]["labels"] == ["bug"]
+        and rep_a["soul"]["soul_id"] != rep_p["soul"]["soul_id"]
+        and rep_a["soul"]["karma"] > 0.0
+        and "action:label" in rep_a["beliefs"],
+        "metrics": {
+            "auditor_salience": aud_world.observables[0]["subjective_salience"],
+            "planner_salience": pln_world.observables[0]["subjective_salience"],
+            "auditor_label": la.data["issues"]["91"]["labels"][0],
+            "planner_label": lp.data["issues"]["91"]["labels"][0],
+            "auditor_karma": rep_a["soul"]["karma"],
+        },
+    }
+
+
 SCENARIOS = [triage, reflex_saves_energy, injection, owner_commands, outage, runaway, crash_isolation,
              scarcity, determinism, public_corpus, local_model_triage, local_model_corpus,
              body_hormonal_homeostasis, m2_myelination_and_catalysis, stem_mitosis_and_apoptosis,
              society_attestation_and_backpressure, genome_evolution_selection,
-             shared_world_locality_and_state]
+             shared_world_locality_and_state, relative_worlds_and_organism_soul]
 
 
 def run_suite(*, live: bool = False) -> dict[str, Any]:
