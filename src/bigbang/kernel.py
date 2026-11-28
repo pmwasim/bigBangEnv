@@ -140,6 +140,8 @@ class Kernel:
         self.hormones: dict[str, float] = {"fuel": 1.0, "stress": 0.0, "urgency": 0.0, "idle": 0.0}
         self.operating_mode: str = "ALERT"
         self._cooldowns: dict[str, int] = {}
+        self.ephemeral: dict[str, str] = {}  # child_name -> parent_stem_name
+        self._pending_apoptosis: list[tuple[str, str]] = []
         self._tick_activity: bool = False
         self._tick_stress: float = 0.0
         self.queue: list[Signal] = []
@@ -333,7 +335,67 @@ class Kernel:
             s for s in pending if s.kind is Kind.INHIBIT or s.id not in delivered
         ] + held + self._outbox
         self._outbox = []
+        self._apply_apoptosis()
         self._update_hormones()
+
+    def _spawn_ephemeral(self, parent: Cell, child: Cell, *, fuel: float, reason: str = "burst") -> bool:
+        """Spawn a bounded ephemeral worker cell funded from a stem cell's own budget."""
+        if parent.lineage != "stem" or fuel <= 0.0 or child.name in self.cells:
+            return False
+        if not self.budgets[parent.name].try_charge(float(fuel)):
+            return False
+        parent_taint = self.taint.get(parent.name, parent.trust)
+        child.organ = parent.organ
+        child.declassify = False
+        child.trust = min(child.trust, parent.trust, parent_taint)
+        self.cells[child.name] = child
+        self.budgets[child.name] = Budget(float(fuel), regen=0.0)
+        self.ephemeral[child.name] = parent.name
+        self._log(
+            "mitosis",
+            parent=parent.name,
+            cell=child.name,
+            organ=parent.organ,
+            fuel=float(fuel),
+            reason=reason,
+        )
+        return True
+
+    def _request_apoptosis(self, cell: Cell, *, reason: str = "complete") -> bool:
+        """Schedule an ephemeral worker for cleanup at the end of the current tick."""
+        if cell.name not in self.ephemeral:
+            return False
+        if not any(name == cell.name for name, _ in self._pending_apoptosis):
+            self._pending_apoptosis.append((cell.name, reason))
+        return True
+
+    def _apply_apoptosis(self) -> None:
+        if not self._pending_apoptosis:
+            return
+        for name, reason in self._pending_apoptosis:
+            if name not in self.ephemeral:
+                continue
+            parent_name = self.ephemeral.pop(name)
+            leftover = 0.0
+            budget = self.budgets.pop(name, None)
+            if budget is not None:
+                leftover = max(0.0, budget.remaining)
+                if parent_name in self.budgets and leftover > 0.0:
+                    p_budget = self.budgets[parent_name]
+                    p_budget.spent = max(0.0, p_budget.spent - leftover)
+            self.cells.pop(name, None)
+            self.dormant.discard(name)
+            self.quarantined.discard(name)
+            self.taint.pop(name, None)
+            self._cooldowns.pop(name, None)
+            self._log(
+                "apoptosis",
+                cell=name,
+                parent=parent_name,
+                reclaimed=round(leftover, 3),
+                reason=reason,
+            )
+        self._pending_apoptosis.clear()
 
     def _run_cell(self, cell: Cell, inbox: list[Signal]) -> None:
         """Step one cell atomically: on exception, roll back its matter and emissions."""
@@ -506,6 +568,17 @@ class Kernel:
     def _condense(self, cell: Cell, mass_gain: float) -> None:
         self.budgets[cell.name].condense(mass_gain)
 
+    def _recover_fuel(self, cell: Cell, units: float, reason: str = "catabolism") -> float:
+        """Exothermic catabolism: recover previously spent fuel up to budget capacity."""
+        if units <= 0.0:
+            return 0.0
+        budget = self.budgets[cell.name]
+        recovered = round(min(float(units), budget.spent), 4)
+        if recovered > 0.0:
+            budget.spent = round(budget.spent - recovered, 4)
+            self._log("catabolize", cell=cell.name, recovered=recovered, why=reason)
+        return recovered
+
     def _spend(self, cell: Cell, units: float, reason: str) -> bool:
         ok = self.budgets[cell.name].try_charge(units)
         self._log("spend" if ok else "denied", cell=cell.name, units=units, why=reason)
@@ -582,6 +655,7 @@ class Kernel:
                     **({"kinetic": self.budgets[name].kinetic} if self.budgets[name].kinetic else {}),
                     **({"entropy": self.budgets[name].entropy} if self.budgets[name].entropy else {}),
                     **({"bound_mass": self.budgets[name].bound_mass} if self.budgets[name].bound_mass else {}),
+                    **({"ephemeral": True} if name in self.ephemeral else {}),
                 }
                 for name, cell in self.cells.items()
             },
@@ -599,7 +673,8 @@ class Kernel:
 
     def restore(self, snap: dict[str, Any]) -> None:
         """Restore state into a kernel whose cells were spawned the same way."""
-        missing = set(snap["cells"]) - set(self.cells)
+        persisted = {name for name, state in snap["cells"].items() if not state.get("ephemeral")}
+        missing = persisted - set(self.cells)
         if missing:
             raise ValueError(f"cells not spawned: {sorted(missing)}")
         self.tick = snap["tick"]
@@ -620,6 +695,8 @@ class Kernel:
         self._cooldowns = {k: int(v) for k, v in snap.get("cooldowns", {}).items()}
         self.dormant, self.quarantined, self.taint = set(), set(), {}
         for name, state in snap["cells"].items():
+            if name not in self.cells:
+                continue
             self.cells[name].memory = json.loads(json.dumps(state["memory"]))
             self.budgets[name].spent = state["spent"]
             self.budgets[name].kinetic = float(state.get("kinetic", 0.0))

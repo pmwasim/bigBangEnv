@@ -318,7 +318,7 @@ class CortexReasoner(Cell):
     """Slow prefrontal cortex inside DeliberationOrgan: dormant during SLEEP_REM."""
 
     lineage = "reasoning"
-    subscriptions = ("issue.novel",)
+    subscriptions = ("issue.novel", "_organ.deliberation.queued")
 
     def __init__(self, name: str = "deliberation.cortex", *, brain: Brain, reserve: float = 10.0, **kw: Any):
         kw.setdefault("emits", ["action.label"])
@@ -328,7 +328,9 @@ class CortexReasoner(Cell):
         self.reserve = reserve
         self.memory.update(thoughts=0, outages=0, deferred_low_fuel=0, energy=0.0, backlog=[], max_backlog=0)
 
-    def _decide(self, ctx: Context, issue: dict[str, Any]) -> str:
+    def _decide(self, ctx: Context, issue: dict[str, Any], hint: str | None = None) -> str:
+        if hint in LABELS:
+            return hint
         if ctx.fuel < self.reserve or ctx.mode == "DORMANT":
             self.memory["deferred_low_fuel"] += 1
             return "needs-human"
@@ -346,7 +348,13 @@ class CortexReasoner(Cell):
         return thought.label
 
     def step(self, ctx: Context) -> None:
-        work = self.memory["backlog"] + [[s.payload, None] for s in ctx.inbox]
+        incoming = []
+        for s in ctx.inbox:
+            if s.topic == "_organ.deliberation.queued" and isinstance(s.payload, dict):
+                incoming.append([s.payload["issue"], s.payload.get("hint")])
+            else:
+                incoming.append([s.payload, None])
+        work = self.memory["backlog"] + incoming
         if ctx.mode == "SLEEP_REM" and not ctx.inbox:
             self.memory["backlog"] = work
             return
@@ -355,14 +363,86 @@ class CortexReasoner(Cell):
             if ctx.fuel < Kernel.EMIT_COST:
                 backlog.append([issue, label])
                 continue
-            label = label or self._decide(ctx, issue)
+            resolved = label if label in LABELS and not isinstance(issue.get("hint_pending"), bool) else self._decide(ctx, issue, hint=label)
             sent = ctx.emit_declassified(
-                "action.label", {"issue": issue["id"], "label": label, "source": "auto"}, LABEL_SCHEMA
+                "action.label", {"issue": issue["id"], "label": resolved, "source": "auto"}, LABEL_SCHEMA
             )
             if sent is None:
-                backlog.append([issue, label])
+                backlog.append([issue, resolved])
         self.memory["backlog"] = backlog
         self.memory["max_backlog"] = max(self.memory["max_backlog"], len(backlog))
+
+
+class BurstWorker(Cell):
+    """Ephemeral worker spawned via stem mitosis; undergoes apoptosis when burst clears."""
+
+    lineage = "housekeeping"
+    subscriptions = ("issue.novel",)
+    step_cost = 0.25
+
+    def __init__(self, name: str, *, idle_limit: int = 3, **kw: Any):
+        kw.setdefault("emits", ["_organ.deliberation.queued"])
+        super().__init__(name, **kw)
+        self.idle_limit = idle_limit
+        self.memory.update(processed=0, idle_ticks=0)
+
+    @staticmethod
+    def _quick_hint(issue: dict[str, Any]) -> str | None:
+        text = f"{issue.get('title', '').lower()} {issue.get('body', '').lower()}"
+        if "crash" in text or "panic" in text or "exception" in text:
+            return "bug"
+        if "?" in issue.get("title", "") and "please" not in text:
+            return "question"
+        return None
+
+    def step(self, ctx: Context) -> None:
+        if not ctx.inbox:
+            self.memory["idle_ticks"] += 1
+            if self.memory["idle_ticks"] >= self.idle_limit and ctx.hormones["urgency"] < 0.25:
+                ctx.apoptosis("burst_drained")
+            return
+        self.memory["idle_ticks"] = 0
+        for s in ctx.inbox:
+            if not isinstance(s.payload, dict):
+                continue
+            hint = self._quick_hint(s.payload)
+            if ctx.emit("_organ.deliberation.queued", {"issue": s.payload, "hint": hint}) is not None:
+                self.memory["processed"] += 1
+
+
+class DeliberationStem(Cell):
+    """Stem spawner inside DeliberationOrgan: allocates ephemeral burst workers under high urgency."""
+
+    lineage = "stem"
+    subscriptions = ()
+    step_cost = 0.25
+
+    def __init__(
+        self,
+        name: str = "deliberation.stem",
+        *,
+        max_workers: int = 2,
+        urgency_threshold: float = 0.35,
+        worker_fuel: float = 25.0,
+        **kw: Any,
+    ):
+        kw.setdefault("emits", [])
+        super().__init__(name, **kw)
+        self.max_workers = max_workers
+        self.urgency_threshold = urgency_threshold
+        self.worker_fuel = worker_fuel
+        self.memory.update(spawned_total=0)
+
+    def step(self, ctx: Context) -> None:
+        if ctx.mode in ("SLEEP_REM", "DORMANT", "LOCKDOWN"):
+            return
+        active = [child for child, parent in ctx._kernel.ephemeral.items() if parent == self.name]
+        if ctx.hormones["urgency"] >= self.urgency_threshold and len(active) < self.max_workers:
+            if ctx.fuel >= self.worker_fuel + 2.0:
+                seq = int(self.memory["spawned_total"]) + 1
+                worker = BurstWorker(f"{self.name}.worker_{seq}", trust=ctx.trust)
+                if ctx.spawn_worker(worker, fuel=self.worker_fuel, reason="urgency_burst"):
+                    self.memory["spawned_total"] = seq
 
 
 # ===================================================================== Organ 3: Memory (Consolidation + M2)
@@ -375,11 +455,14 @@ class MemoryConsolidator(Cell):
     def __init__(self, name: str = "memory.consolidator", **kw: Any):
         kw.setdefault("emits", [])
         super().__init__(name, **kw)
-        self.memory.update(outcomes={}, molecules=[], consolidations=0)
+        self.memory.update(outcomes={}, molecules=[], consolidations=0, decayed_matter=0, catabolized_fuel=0.0)
 
     def step(self, ctx: Context) -> None:
         store = MatterStore.from_list(self.memory.get("molecules", []), max_molecules=256)
         pruned = store.decay(ctx.tick)
+        if pruned:
+            self.memory["consolidations"] += pruned
+            self.memory["decayed_matter"] = self.memory.get("decayed_matter", 0) + pruned
 
         for signal in ctx.inbox:
             verb = signal.topic.split(".", 1)[1]
@@ -400,8 +483,11 @@ class MemoryConsolidator(Cell):
                     store.consolidate(mol.key)
                     ctx.condense(0.5)
                     self.memory["consolidations"] += 1
-        if pruned:
-            self.memory["consolidations"] += pruned
+            decayed = self.memory.get("decayed_matter", 0)
+            if decayed > 0:
+                recovered = ctx.recover_fuel(min(2.0, decayed * 0.25), "catabolism")
+                self.memory["catabolized_fuel"] = round(self.memory.get("catabolized_fuel", 0.0) + recovered, 4)
+                self.memory["decayed_matter"] = 0
         self.memory["molecules"] = store.to_list()
 
 
@@ -537,6 +623,9 @@ class OutcomeSensor(Cell):
             elif status in ("failed", "expired"):
                 self.memory["failures"] += 1
                 ctx.emit_gradient("friction", 0.5)
+        total = self.memory["verified"] + self.memory["failures"]
+        if total >= 3 and (self.memory["verified"] / total) < 0.7:
+            ctx.emit_gradient("friction", 0.2)
 
 
 # ===================================================================== Organ 5: Bloodstream Coordinator
@@ -625,10 +714,11 @@ def build_body(
         name="deliberation",
         in_ports=("issue.novel",),
         out_ports=("action.label",),
-        energy_pool=cfg["reasoner_fuel"],
-        base_regen=cfg["reasoner_regen"],
+        energy_pool=cfg["reasoner_fuel"] * 2.0,
+        base_regen=cfg["reasoner_regen"] * 2.0,
     )
     deliberation_organ.add_cell(CortexReasoner(brain=brain, reserve=cfg["reasoner_reserve"]), share=1.0)
+    deliberation_organ.add_cell(DeliberationStem(), share=1.0)
 
     memory_organ = Organ(
         name="memory",
@@ -697,6 +787,11 @@ def body_report(kernel: Kernel, ledger: Ledger, genome: Genome, organs: dict[str
     guardian = kernel.cells["defense.guardian"].memory
     myelin = kernel.cells["memory.myelin"].memory
     synthesis = kernel.cells["perception.synthesis"].memory
+    consolidator = kernel.cells["memory.consolidator"].memory
+    verifier = kernel.cells["action.verifier"].memory
+    stem = kernel.cells["deliberation.stem"].memory
+    v_total = max(1, verifier["verified"] + verifier["failures"])
+    spine_total = reflex["hits"] + reflex["compiled_hits"]
     return {
         "identity": genome.identity,
         "role": genome.role,
@@ -725,6 +820,16 @@ def body_report(kernel: Kernel, ledger: Ledger, genome: Genome, organs: dict[str
                 ingest["seen_total"] + synthesis["synthesized"],
             ),
             "enthalpy": round(synthesis["enthalpy"], 3),
+        },
+        "homeostasis": {
+            "goal_tension": len(cortex["backlog"]) + len(reflex["backlog"]) + cortex["deferred_low_fuel"],
+            "epistemic_coherence": round(verifier["verified"] / v_total, 4),
+            "metabolic_efficiency": round(spine_total / max(1, spine_total + cortex["thoughts"]), 4),
+            "catabolized_fuel": round(float(consolidator.get("catabolized_fuel", 0.0)), 3),
+            "active_ephemeral": len(kernel.ephemeral),
+            "mitoses": int(events.get("mitosis", 0)),
+            "apoptoses": int(events.get("apoptosis", 0)),
+            "stem_spawned": int(stem.get("spawned_total", 0)),
         },
         "work_energy": round(work_energy, 3),
         "dormant": sorted(kernel.dormant),

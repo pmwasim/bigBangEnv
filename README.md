@@ -9,8 +9,9 @@ Today's "AI agents" are stateless reasoning engines in a loop, with safety bolte
 ## Status
 
 - **M0 — Genesis kernel: done.** Deterministic ticks, kernel-stamped trust and taint, topic floors, capabilities, declassification, metered energy with dormancy and wake, fail-safe inhibition, atomic steps with quarantine, kill switch, snapshot/restore, replay.
-- **M1 — First organism: done.** The *repo caretaker* triages issues and executes owner commands, with sensory, reflex, reasoning, defense and motor cells and a pluggable brain (rule, offline or Claude). Real-model measurement is deferred until there is an API budget ([ADR-0008](docs/decisions/0008-public-benchmark-without-llm-budget.md)).
-- **Next: M2 (reflex compilation).** The gate is open ([roadmap](docs/ROADMAP.md#gate-before-m2--open)).
+- **M1 — First organism: done.** The *repo caretaker* triages issues and executes owner commands, with sensory, reflex, reasoning, defense and motor cells and a pluggable brain (rule, offline or Claude).
+- **M2–M4 — Physics, Chemistry, Organs & Unified Body: done.** 5-organ `Body` with immutable `Genome`, `Physics` (`ChargeVector`, `EnergyTensor`, 4 forces), `Chemistry` (`ReactionChamber`, catalysis, equilibrium), `MyelinCompiler`, `StemCell` mitosis/apoptosis, and `SLEEP_REM` catabolism (ADRs 0011–0015).
+- **Next: Society & Civilization ([roadmap](docs/ROADMAP.md#next--society--civilization-level-7)).** Cryptographic `Skin` attestation, inter-body hormonal backpressure, and shared ecology.
 
 ### M1 results ([full report](docs/EVALUATION.md))
 
