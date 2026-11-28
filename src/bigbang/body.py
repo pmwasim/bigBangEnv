@@ -9,6 +9,7 @@ from typing import Any
 from .apps.caretaker import LABELS, LABEL_SCHEMA, Commander, Ledger, drain
 from .brains import Brain, BrainUnavailable, RuleBrain, make_brain
 from .cell import Cell, Context
+from .chemistry import Catalyst, Reaction, ReactionChamber, toxicity_ph
 from .kernel import MAX_INT, Kernel
 from .lineages import Defense, Motor
 from .matter import MatterStore
@@ -18,6 +19,13 @@ from .signal import Trust
 MAX_TITLE, MAX_BODY = 300, 20_000
 PROMOTE_SCHEMA = {"sig_id": int, "label": frozenset(LABELS), "shadow": bool}
 DEMOTE_SCHEMA = {"sig_id": int}
+CATALYZE_SCHEMA = {"sig_id": int}
+CORRELATE_REACTION = Reaction(
+    name="correlate_incident",
+    reactants={"symptom": 1, "context": 1},
+    product="correlated_issue",
+    activation_energy=2.0,
+)
 
 
 def stable_sig_id(sig: str) -> int:
@@ -95,6 +103,118 @@ class SensoryIngest(Cell):
 
         self.memory["molecules"] = store.to_list()
         drain(self, ctx, fresh, lambda item: ctx.emit("_organ.perception.parsed", item) is not None)
+
+
+class SynthesisCell(Cell):
+    """Chemical reactor inside Perception: bonds reagents into correlated issues via Ea & catalysts."""
+
+    lineage = "sensory"
+    subscriptions = ("world.reagent", "chemistry.catalyze")
+
+    def __init__(self, name: str = "perception.synthesis", **kw: Any):
+        kw.setdefault("emits", ["_organ.perception.parsed"])
+        super().__init__(name, **kw)
+        self.memory.update(
+            chamber=ReactionChamber().to_dict(),
+            products=[],
+            synthesized=0,
+            catalysts=0,
+            enthalpy=0.0,
+            dropped=0,
+        )
+
+    @staticmethod
+    def _valid_reagent(payload: Any) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        kind = payload.get("kind")
+        title = payload.get("title")
+        rid = payload.get("id")
+        if kind not in CORRELATE_REACTION.reactants:
+            return False
+        if not isinstance(title, str) or not title.strip():
+            return False
+        if not isinstance(payload.get("body", ""), str):
+            return False
+        if rid is not None and (isinstance(rid, bool) or not isinstance(rid, int) or not (0 <= rid < MAX_INT)):
+            return False
+        return True
+
+    def step(self, ctx: Context) -> None:
+        chamber = ReactionChamber.from_dict(self.memory["chamber"])
+        prod_store = MatterStore.from_list(self.memory.get("products", []), max_molecules=64)
+        prod_store.decay(ctx.tick)
+
+        for s in ctx.inbox:
+            if s.topic == "chemistry.catalyze":
+                if s.trust >= Trust.OPERATOR and isinstance(s.payload, dict):
+                    sig_id = s.payload.get("sig_id")
+                    if isinstance(sig_id, int) and not isinstance(sig_id, bool):
+                        chamber.add_catalyst(Catalyst(f"cat:{sig_id}", CORRELATE_REACTION.name, ea_reduction=0.25))
+                        self.memory["catalysts"] = len(chamber.catalysts)
+                continue
+
+            if s.topic == "world.reagent":
+                if not self._valid_reagent(s.payload):
+                    self.memory["dropped"] += 1
+                    ctx.emit_gradient("friction", 0.2)
+                    continue
+                ttl = s.payload.get("ttl", 20)
+                if isinstance(ttl, bool) or not isinstance(ttl, int) or ttl < 1:
+                    ttl = 20
+                chamber.add_reagent(
+                    s.payload["kind"],
+                    {
+                        "id": s.payload.get("id"),
+                        "title": s.payload["title"][:MAX_TITLE],
+                        "body": s.payload.get("body", "")[:MAX_BODY],
+                    },
+                    trust=s.trust,
+                    risk=s.risk,
+                    tick=ctx.tick,
+                    ttl=ttl,
+                )
+
+        bonded, spent = chamber.step_reaction(
+            CORRELATE_REACTION,
+            tick=ctx.tick,
+            available_energy=ctx.fuel,
+            product_concentration=len(prod_store),
+        )
+        if spent > 0.0:
+            ctx.spend(spent, "chemistry")
+            self.memory["enthalpy"] = float(self.memory["enthalpy"]) + spent
+
+        for mol in bonded:
+            compound = mol.value if isinstance(mol.value, dict) else {}
+            bonds = compound.get("bonds", [])
+            by_kind: dict[str, dict[str, Any]] = {}
+            for entry in bonds:
+                if isinstance(entry, dict):
+                    for kind, data in entry.items():
+                        if isinstance(data, dict):
+                            by_kind[kind] = data
+            sym = by_kind.get("symptom", {})
+            cxt = by_kind.get("context", {})
+            issue_id = sym.get("id") if sym.get("id") is not None else cxt.get("id")
+            if issue_id is None:
+                self.memory["dropped"] += 1
+                continue
+            title = sym.get("title", "")
+            body_parts = [p for p in (sym.get("body", ""), cxt.get("title", ""), cxt.get("body", "")) if p]
+            issue_payload = {
+                "id": int(issue_id),
+                "title": str(title)[:MAX_TITLE],
+                "body": "\n".join(body_parts)[:MAX_BODY],
+                "source_topic": "world.reagent",
+            }
+            bonded_risk = float(compound.get("risk", 0.0))
+            if ctx.emit("_organ.perception.parsed", issue_payload, risk=bonded_risk) is not None:
+                prod_store.put(mol.key, issue_payload["title"], trust=mol.trust, tick=ctx.tick, ttl=20)
+                self.memory["synthesized"] += 1
+
+        self.memory["chamber"] = chamber.to_dict()
+        self.memory["products"] = prod_store.to_list()
 
 
 class FastSpineReflex(Cell):
@@ -300,7 +420,7 @@ class MyelinCompiler(Cell):
         shadow_needed: int = 3,
         **kw: Any,
     ):
-        kw.setdefault("emits", ["myelin.promote", "myelin.demote"])
+        kw.setdefault("emits", ["myelin.promote", "myelin.demote", "chemistry.catalyze"])
         kw.setdefault("declassify", True)
         super().__init__(name, **kw)
         self.min_support = min_support
@@ -361,6 +481,11 @@ class MyelinCompiler(Cell):
                                     "myelin.promote",
                                     {"sig_id": sh_sid_int, "label": lbl, "shadow": False},
                                     PROMOTE_SCHEMA,
+                                )
+                                ctx.emit_declassified(
+                                    "chemistry.catalyze",
+                                    {"sig_id": sh_sid_int},
+                                    CATALYZE_SCHEMA,
                                 )
                                 ctx.condense(1.5)
                                 self.memory["promoted"].append(sh_sid)
@@ -472,7 +597,14 @@ def build_body(
     brain = brain or (make_brain(cfg["brain"], **cfg["brain_options"]) if cfg["brain"] else RuleBrain())
 
     kernel = Kernel()
-    for topic in ("action.label", "action.close", "action.reopen", "myelin.promote", "myelin.demote"):
+    for topic in (
+        "action.label",
+        "action.close",
+        "action.reopen",
+        "myelin.promote",
+        "myelin.demote",
+        "chemistry.catalyze",
+    ):
         kernel.require(topic, Trust.OPERATOR)
 
     fuel, regen = cfg["fuel"], cfg["regen"]
@@ -480,13 +612,14 @@ def build_body(
 
     perception_organ = Organ(
         name="perception",
-        in_ports=("world.issue", "peer.signal", "myelin.promote", "myelin.demote"),
+        in_ports=("world.issue", "peer.signal", "world.reagent", "chemistry.catalyze", "myelin.promote", "myelin.demote"),
         out_ports=("action.label", "issue.novel", "myelin.shadow"),
-        energy_pool=fuel * 2.0,
-        base_regen=regen * 2.0,
+        energy_pool=fuel * 3.0,
+        base_regen=regen * 3.0,
     )
     perception_organ.add_cell(SensoryIngest(), share=1.0)
     perception_organ.add_cell(FastSpineReflex(enabled=cfg["reflex"]), share=1.0)
+    perception_organ.add_cell(SynthesisCell(), share=1.0)
 
     deliberation_organ = Organ(
         name="deliberation",
@@ -500,7 +633,7 @@ def build_body(
     memory_organ = Organ(
         name="memory",
         in_ports=("outcome.*", "issue.novel", "action.label", "myelin.shadow"),
-        out_ports=("myelin.promote", "myelin.demote"),
+        out_ports=("myelin.promote", "myelin.demote", "chemistry.catalyze"),
         energy_pool=fuel * 2.0,
         base_regen=regen * 2.0,
     )
@@ -563,6 +696,7 @@ def body_report(kernel: Kernel, ledger: Ledger, genome: Genome, organs: dict[str
     motor = kernel.cells["action.motor"].memory
     guardian = kernel.cells["defense.guardian"].memory
     myelin = kernel.cells["memory.myelin"].memory
+    synthesis = kernel.cells["perception.synthesis"].memory
     return {
         "identity": genome.identity,
         "role": genome.role,
@@ -583,6 +717,15 @@ def body_report(kernel: Kernel, ledger: Ledger, genome: Genome, organs: dict[str
         "defense": {k: guardian[k] for k in ("mode", "vetoes", "lockdowns")},
         "organs": {name: organ.summary(kernel) for name, organ in organs.items()},
         "physics": kernel.physics_summary(),
+        "chemistry": {
+            "synthesized": synthesis["synthesized"],
+            "catalysts": synthesis["catalysts"],
+            "toxicity_ph": toxicity_ph(
+                ingest["dropped"] + synthesis["dropped"],
+                ingest["seen_total"] + synthesis["synthesized"],
+            ),
+            "enthalpy": round(synthesis["enthalpy"], 3),
+        },
         "work_energy": round(work_energy, 3),
         "dormant": sorted(kernel.dormant),
         "quarantined": sorted(kernel.quarantined),
