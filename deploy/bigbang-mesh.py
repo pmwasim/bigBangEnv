@@ -293,6 +293,18 @@ def cmd_route(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_probe(args: argparse.Namespace) -> int:
+    """Inject live POSIX/Linux domain telemetry from target container into its own issues queue."""
+    c_name = args.container
+    seq = int(time.time()) % 1_000_000
+    out = run_cmd([
+        "incus", "exec", c_name, "--", "bash", "-lc",
+        f"/opt/bigbang/venv/bin/python -m bigbang probe --seq {seq} --out /var/lib/bigbang/issues && chown -R bigbang:bigbang /var/lib/bigbang/issues"
+    ])
+    print(out)
+    return 0
+
+
 def cmd_trace(args: argparse.Namespace) -> int:
     c_name = args.container
     tail = args.tail
@@ -340,6 +352,9 @@ def main() -> int:
     route.add_argument("--affinity", default="*", help="Required Body role affinity (or * for any)")
     route.add_argument("--risk", type=float, default=0.1, help="Signal risk charge [0.0..1.0]")
 
+    probe = sub.add_parser("probe", help="Collect live host telemetry inside a Body container")
+    probe.add_argument("container", help="Target container name (e.g. bb-alpha-sentinel)")
+
     args = parser.parse_args()
     if args.command == "list":
         return cmd_list(args)
@@ -355,6 +370,8 @@ def main() -> int:
         return cmd_trace(args)
     elif args.command == "route":
         return cmd_route(args)
+    elif args.command == "probe":
+        return cmd_probe(args)
     return 0
 
 
