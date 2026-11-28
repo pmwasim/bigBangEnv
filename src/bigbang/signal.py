@@ -39,6 +39,8 @@ class Signal:
     born: int  # tick at which the signal was emitted
     ttl: int  # ticks the signal stays alive after birth
     held: int = 0  # ticks spent paused by an inhibition; they don't age the signal
+    risk: float = 0.0  # blast-radius charge [0.0..1.0]
+    affinity: str = "*"  # receptor/flavor binding charge
 
     def expired(self, tick: int) -> bool:
         return tick - self.born - self.held > self.ttl
@@ -49,6 +51,10 @@ class Signal:
         data["trust"] = self.trust.name
         if not self.held:
             del data["held"]  # keep the trace unchanged for signals that were never paused
+        if not self.risk:
+            del data["risk"]
+        if self.affinity == "*":
+            del data["affinity"]
         return data
 
     @classmethod
@@ -63,4 +69,6 @@ class Signal:
             born=data["born"],
             ttl=data["ttl"],
             held=data.get("held", 0),
+            risk=float(data.get("risk", 0.0)),
+            affinity=str(data.get("affinity", "*")),
         )

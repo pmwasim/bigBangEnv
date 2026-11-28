@@ -67,6 +67,8 @@ class Context:
         # residue of anything it consumed before (it may still be in its matter).
         residue = kernel.taint.get(cell.name, cell.trust)
         self.trust = min([cell.trust, residue, *(s.trust for s in inbox)])
+        # Risk charge conservation: output risk is at least the highest risk consumed.
+        self.risk = max([0.0, *(s.risk for s in inbox)])
 
     @property
     def tick(self) -> int:
@@ -104,14 +106,33 @@ class Context:
         """True while a live veto names this signal."""
         return self._kernel.is_vetoed(signal_id, topic)
 
-    def emit(self, topic: str, payload: Any = None, *, ttl: int = 3) -> Signal | None:
-        return self._kernel._emit(self._cell, topic, payload, Kind.EXCITE, ttl, self.trust)
+    def emit(
+        self, topic: str, payload: Any = None, *, ttl: int = 3, risk: float = 0.0, affinity: str = "*"
+    ) -> Signal | None:
+        effective_risk = max(self.risk, float(risk))
+        return self._kernel._emit(
+            self._cell, topic, payload, Kind.EXCITE, ttl, self.trust, risk=effective_risk, affinity=affinity
+        )
 
     def emit_declassified(
-        self, topic: str, payload: dict[str, Any], schema: dict[str, Any], *, ttl: int = 3
+        self,
+        topic: str,
+        payload: dict[str, Any],
+        schema: dict[str, Any],
+        *,
+        ttl: int = 3,
+        risk: float = 0.0,
+        affinity: str = "*",
     ) -> Signal | None:
         """Emit at the cell's own trust, if granted and the payload fits a closed schema."""
-        return self._kernel._declassify(self._cell, topic, payload, schema, ttl, self.trust)
+        effective_risk = max(self.risk, float(risk))
+        return self._kernel._declassify(
+            self._cell, topic, payload, schema, ttl, self.trust, risk=effective_risk, affinity=affinity
+        )
+
+    def condense(self, mass_gain: float = 1.0) -> None:
+        """E=mc^2: record condensation of computational energy into structural bound mass."""
+        self._kernel._condense(self._cell, mass_gain)
 
     def inhibit(self, topic: str, *, ttl: int = 3, reason: str = "") -> Signal | None:
         """Pause excite signals on ``topic`` (wildcards allowed) for ``ttl`` ticks."""

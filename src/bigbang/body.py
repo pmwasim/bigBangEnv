@@ -278,6 +278,7 @@ class MemoryConsolidator(Cell):
             for mol in store.items():
                 if mol.hits >= 2 and mol.ttl is not None:
                     store.consolidate(mol.key)
+                    ctx.condense(0.5)
                     self.memory["consolidations"] += 1
         if pruned:
             self.memory["consolidations"] += pruned
@@ -361,6 +362,7 @@ class MyelinCompiler(Cell):
                                     {"sig_id": sh_sid_int, "label": lbl, "shadow": False},
                                     PROMOTE_SCHEMA,
                                 )
+                                ctx.condense(1.5)
                                 self.memory["promoted"].append(sh_sid)
                         else:
                             sh["disagree"] += 1
@@ -435,7 +437,7 @@ class Bloodstream(Cell):
             "ALERT": {"perception": 1.0, "action": 1.0, "memory": 1.0, "defense": 1.0, "deliberation": 1.0},
             "DEEP_FOCUS": {"perception": 1.25, "action": 1.25, "memory": 0.5, "defense": 1.0, "deliberation": 1.5},
             "LOCKDOWN": {"perception": 0.75, "action": 0.5, "memory": 0.5, "defense": 1.75, "deliberation": 0.5},
-            "SLEEP_REM": {"perception": 0.5, "action": 0.5, "memory": 2.0, "defense": 1.0, "deliberation": 0.25},
+            "SLEEP_REM": {"perception": 0.5, "action": 0.5, "memory": 2.0, "defense": 1.0, "deliberation": 0.5},
             "DORMANT": {"perception": 0.5, "action": 0.25, "memory": 0.5, "defense": 1.0, "deliberation": 0.25},
         }.get(mode, {})
         for name, factor in weights.items():
@@ -580,6 +582,7 @@ def body_report(kernel: Kernel, ledger: Ledger, genome: Genome, organs: dict[str
         "motor": {k: motor.get(k, 0) for k in ("executed", "vetoed", "failed", "expired")},
         "defense": {k: guardian[k] for k in ("mode", "vetoes", "lockdowns")},
         "organs": {name: organ.summary(kernel) for name, organ in organs.items()},
+        "physics": kernel.physics_summary(),
         "work_energy": round(work_energy, 3),
         "dormant": sorted(kernel.dormant),
         "quarantined": sorted(kernel.quarantined),
