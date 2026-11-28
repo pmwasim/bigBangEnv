@@ -96,3 +96,16 @@ def test_body_differentiation_and_persistent_karma_with_immutable_laws():
     assert rep_pln["cortex"]["caution_holds"] == 0
     assert rep_aud["soul"]["karma"] > 0.0
     assert rep_aud["beliefs"]["action:label"]["confidence"] > 0.5
+
+
+def test_soul_and_character_survive_legacy_snapshot_restore():
+    k, l, g, o = build_body({"role": "triage"})
+    snap = k.snapshot()
+    # Simulate an older pre-ADR-0019 snapshot missing soul/character/karma keys
+    snap["cells"]["action.verifier"]["memory"] = {"verified": 2, "failures": 0}
+    k.restore(snap)
+    k.step()
+    mem = k.cells["action.verifier"].memory
+    assert mem["soul"]["soul_id"].startswith("soul:")
+    assert mem["character"]["caution"] == 0.65
+    assert mem["karma"] == 0.0

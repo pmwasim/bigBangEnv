@@ -642,18 +642,31 @@ class OutcomeSensor(Cell):
     lineage = "sensory"
     subscriptions = ("outcome.*",)
 
-    def __init__(self, name: str = "action.verifier", *, role: str = "general", **kw: Any):
+    def __init__(
+        self,
+        name: str = "action.verifier",
+        *,
+        role: str = "general",
+        soul: Soul | None = None,
+        character: Character | None = None,
+        **kw: Any,
+    ):
         kw.setdefault("emits", [])
         super().__init__(name, **kw)
+        self._default_soul = (soul or Soul.create(f"body-{role}", calling=role)).to_dict()
+        self._default_character = (character or Character.for_role(role)).to_dict()
         self.memory.update(
             verified=0,
             failures=0,
             karma=0.0,
-            character=Character.for_role(role).to_dict(),
+            soul=self._default_soul,
+            character=self._default_character,
             beliefs={},
         )
 
     def step(self, ctx: Context) -> None:
+        self.memory.setdefault("soul", self._default_soul)
+        self.memory.setdefault("character", self._default_character)
         beliefs = BeliefSystem.from_dict(self.memory.get("beliefs", {}))
         karma = float(self.memory.get("karma", 0.0))
         for s in ctx.inbox:
@@ -801,7 +814,7 @@ def build_body(
     )
     action_organ.add_cell(Commander(), share=1.0)
     action_organ.add_cell(Motor("action.motor", ledger.effectors(), resume_per_tick=pace), share=1.0)
-    action_organ.add_cell(OutcomeSensor(role=cfg["role"]), share=1.0)
+    action_organ.add_cell(OutcomeSensor(role=cfg["role"], soul=soul, character=character), share=1.0)
 
     organs: dict[str, Organ] = {
         "perception": perception_organ,
